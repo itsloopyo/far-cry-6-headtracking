@@ -1,0 +1,19 @@
+{
+  "schema_version": 2,
+  "mod_info": {
+    "name": "FarCry6HeadTracking",
+    "version": "0.0.0",
+    "game_id": "far-cry-6"
+  },
+  "strategy": "Shim",
+  "delivery_mode": "manifest",
+  "files": [
+    {
+      "source": "plugins/tobii_gameintegration_x64.dll",
+      "target": "bin/tobii_gameintegration_x64.dll",
+      "backup": true
+    }
+  ],
+  "runtime_requirements": [],
+  "dependencies": []
+}

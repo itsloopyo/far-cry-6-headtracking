@@ -1,0 +1,90 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+
+# Nothing in this workflow writes to the repository or to any package registry: it
+# builds, tests and inspects the ZIP it produced. Anything more is what the default
+# token would hand to a compromised action.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and Validate
+    runs-on: windows-latest
+    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          submodules: recursive
+
+      - name: Setup Visual Studio environment
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3.0.0
+
+      - name: Setup pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          pixi run test
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::pixi run test failed"
+            exit 1
+          }
+
+      - name: Build and package
+        shell: pwsh
+        run: |
+          pixi run package
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::pixi run package failed"
+            exit 1
+          }
+
+      - name: Verify installer was produced
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "release/*-installer.zip" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $installer) {
+            Write-Host "::error::No installer ZIP found in release/"
+            exit 1
+          }
+          Write-Host "  $($installer.Name) ($([math]::Round($installer.Length / 1KB, 2)) KB)"
+
+      # The launcher deploys from launcher-manifest.json and never runs install.cmd,
+      # so a wrong files[].source ships as a silent no-op: the launcher reports
+      # "Installed" and the game runs vanilla.
+      - name: Validate the launcher manifest against the built ZIP
+        shell: pwsh
+        run: |
+          pixi run validate-manifest
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::launcher manifest validation failed"
+            exit 1
+          }
+
+      # The ZIP is a binary distribution of MinHook, whose BSD-2-Clause terms
+      # require the notice to travel with it.
+      - name: Validate the third-party notices
+        shell: pwsh
+        run: |
+          pixi run validate-notices
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::third-party notices validation failed"
+            exit 1
+          }

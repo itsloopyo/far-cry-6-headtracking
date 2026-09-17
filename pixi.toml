@@ -1,0 +1,63 @@
+[workspace]
+name = "far-cry-6-head-tracking"
+version = "0.0.0"
+description = "Head tracking mod for Far Cry 6 using OpenTrack"
+license = "MIT"
+channels = ["conda-forge"]
+platforms = ["win-64"]
+
+[tasks]
+# Sync the cameraunlock-core submodule to its tracked branch.
+sync = "git submodule update --remote cameraunlock-core"
+
+# Configure the CMake build. No -G: let CMake pick whichever Visual Studio is
+# installed, so a runner image moving to a newer VS does not break the build.
+setup = { cmd = """
+    powershell -Command "if (-not (Test-Path 'build')) { cmake -B build -A x64 } else { Write-Host 'Build directory exists, skipping setup' -ForegroundColor Yellow }"
+""" }
+
+build = { cmd = "cmake --build build --config Debug", depends-on = ["setup"] }
+build-release = { cmd = "cmake --build build --config Release", depends-on = ["setup"] }
+
+# Native unit tests for the sign and unit conversion and the INI guards.
+test = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/run-tests.ps1" }
+
+# Build and deploy into the game directory.
+install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 -Configuration Release", depends-on = ["build-release"] }
+
+uninstall = 'scripts\uninstall.cmd /y'
+
+# Package the installer ZIP. There is no Nexus ZIP: the mod replaces a file the game
+# ships in its own bin folder, which no mod manager can deploy or roll back, so it is
+# installer-only. Do not add a -nexus.zip stage here.
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build-release"] }
+
+# The launcher manifest and the notices are what the launcher and the release ZIP
+# are trusted on, so both are checkable rather than reviewed by eye.
+# Validates the built installer ZIP against its manifest, so run package first. No
+# depends-on: CI runs this straight after `pixi run package` and re-running the
+# packager there would rebuild the ZIP it is meant to be inspecting.
+validate-manifest = "node cameraunlock-core/scripts/validate-manifest.mjs"
+validate-notices = { cmd = "node cameraunlock-core/scripts/validate-notices.mjs" }
+
+# Nothing is vendored here: the mod replaces a library the game already ships, so
+# there is no loader archive to refresh. The task exists because update-deps.ps1
+# elsewhere in the fleet tells the user to run it, and a repo without the task
+# prints a recovery instruction that cannot work.
+update-deps = "powershell -Command \"Write-Host 'Nothing is vendored in this mod, so there is nothing to update. Run pixi run sync to move cameraunlock-core.' -ForegroundColor Yellow\""
+
+# Runs unattended: the invocation is the authorization and the script never
+# prompts.
+# Usage: pixi run release <major|minor|patch|nightly|X.Y.Z>.
+release = "powershell -ExecutionPolicy Bypass -File scripts/release.ps1"
+
+# `pixi run release nightly` dispatches here too. The task exists in its own right
+# because core's conformance check treats release-nightly as a canonical task.
+release-nightly = "powershell -ExecutionPolicy Bypass -File scripts/release-nightly.ps1"
+
+clean = { cmd = """
+    powershell -Command "if (Test-Path build) { Remove-Item build -Recurse -Force }; if (Test-Path build-tests) { Remove-Item build-tests -Recurse -Force }; if (Test-Path bin) { Remove-Item bin -Recurse -Force }; Write-Host 'Build artifacts cleaned' -ForegroundColor Green"
+""" }
+
+[dependencies]
+# None - the build uses the system CMake and Visual Studio.
