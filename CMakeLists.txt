@@ -24,7 +24,11 @@ add_subdirectory(cameraunlock-core/cpp ${CMAKE_BINARY_DIR}/cameraunlock-core)
 # tobii_gameintegration_x64.dll.backup and puts it back on uninstall.
 add_library(FarCry6HeadTracking SHARED
     src/camera_adapter.cpp
+    src/headlight.cpp
     src/orientation_dot.cpp
+    src/build_profile.cpp
+    src/ubisoft_offsets.cpp
+    src/steam_offsets.cpp
     src/dllmain.cpp
     src/config.cpp
     src/mod.cpp

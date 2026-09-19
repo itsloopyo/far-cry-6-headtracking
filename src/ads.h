@@ -12,11 +12,9 @@
 
 namespace FarCry6HeadTracking {
 
-// Far Cry 6 ships the two-slot ADS cycle, paused and tracked. The orientation dot
-// already marks the aim point whenever the game hides its own reticle, which it
-// does with iron sights up, so a separate marker slot would draw a second mark on
-// the same point. `marker` is not a value here: ParseAdsMode is always called with
-// allowMarker false, and the cycle is the two-slot one.
+// Far Cry 6 ships the two-slot ADS cycle, paused and tracked. `marker` is not a
+// value here: ParseAdsMode is always called with allowMarker false, and the cycle
+// is the two-slot one.
 using cameraunlock::ads::AdsMode;
 using cameraunlock::ads::AdsModeValue;
 using cameraunlock::ads::kDefaultAdsMode;
@@ -32,8 +30,7 @@ inline AdsMode NextFarCry6AdsMode(AdsMode mode) {
 }
 
 // What the mode does, for the log. Core's toast wording does not fit this game:
-// roll stays live in paused, and the orientation dot is drawn with the sights up
-// in tracked.
+// roll stays live in paused.
 inline const char* FarCry6AdsModeDescription(AdsMode mode) {
     return mode == AdsMode::Tracked
                ? "ADS mode: tracked - the view settles onto the sights, then head tracking "

@@ -2,16 +2,17 @@
 // Copyright (c) 2026 itsloopyo
 
 #include "camera_adapter.h"
+#include "build_profile.h"
 #include "camera_pose.h"
 #include "frame_pump.h"
+#include "headlight.h"
+#include "orientation_dot.h"
 #include "logging.h"
 #include "mod.h"
-#include "orientation_dot.h"
 
 #include "cameraunlock/camera/lean_clamp.h"
 #include "cameraunlock/hooks/hook_manager.h"
 #include "cameraunlock/math/quat4.h"
-#include "cameraunlock/memory/pe_fingerprint.h"
 
 #include <windows.h>
 
@@ -40,12 +41,16 @@ RotationFn g_rotation = nullptr;
 SetAnglesFn g_setAngles = nullptr;
 RenderFn g_render = nullptr;
 uintptr_t g_module = 0;
+const Offsets* g_offsets = nullptr;
 
 struct UpdateContext {
     void* camera = nullptr;
     float dt = 0.0f;
     bool head_active = false;
+    Quat4 clean_view;
+    Quat4 tracked_view;
 };
+std::atomic<float> g_aspect{16.0f / 9.0f};
 thread_local UpdateContext g_updateContext;
 
 struct RenderPose {
@@ -73,8 +78,8 @@ std::atomic<unsigned long long> g_aimingStamp{0};
 constexpr unsigned long long kAimingFreshMs = 200;
 
 template <typename Fn>
-Fn Native(uintptr_t rva) {
-    return reinterpret_cast<Fn>(g_module + rva);
+Fn Native(const NativeFunction& function) {
+    return reinterpret_cast<Fn>(g_module + function.rva);
 }
 
 struct QueryFilter {
@@ -97,11 +102,11 @@ LeanObstruction QueryLean(void* context, const Vec3& start,
                          const Vec3& direction, float distance) {
     const auto& query = *static_cast<QueryContext*>(context);
     QueryFilter filter{};
-    Native<void (*)(QueryFilter*, uint32_t, uint32_t)>(0xa6c4b0)(&filter, 0x2dbf, 0);
+    Native<void (*)(QueryFilter*, uint32_t, uint32_t)>(g_offsets->query_filter_construct)(&filter, 0x2dbf, 0);
     QueryHits hits;
     const Vec3 segment = direction * distance;
     Native<void (*)(void*, const Vec3*, const Vec3*, QueryHits*, const QueryFilter*,
-                    void*, uint32_t, bool)>(0xa97520)(
+                    void*, uint32_t, bool)>(g_offsets->world_ray_query)(
         query.world, &start, &segment, &hits, &filter, query.ignored_collider, 0x13, false);
 
     LeanObstruction result{true, false, distance};
@@ -112,14 +117,14 @@ LeanObstruction QueryLean(void* context, const Vec3& start,
         result.blocked = true;
         result.distance = std::min(result.distance, hitDistance);
     }
-    Native<void (*)(QueryHits*)>(0x9edf70)(&hits);
-    Native<void (*)(QueryFilter*)>(0xa71800)(&filter);
+    Native<void (*)(QueryHits*)>(g_offsets->query_hits_destroy)(&hits);
+    Native<void (*)(QueryFilter*)>(g_offsets->query_filter_destroy)(&filter);
     return result;
 }
 
-// The camera update resolves the owner through 0x12a2140 and ORs two answers into
-// its aim state: the byte at +0x2afa is the sights (read at 0x12d9714) and virtual
-// slot 0x230 is the binoculars (called at 0x12d9754). That aim state is what the
+// The camera update resolves the owner through camera_owner and ORs two answers into
+// its aim state: the byte at +0x2afa is the sights (read at sights_read) and virtual
+// slot 0x230 is the binoculars (called at binoculars_call). That aim state is what the
 // update pauses the extended view on when the profile's ExtendedViewInIronsight is
 // off, so it is the game's own definition of aiming.
 void PublishAiming(void* camera) {
@@ -127,17 +132,27 @@ void PublishAiming(void* camera) {
     // owner. A camera with no owner has no aim state, and must not overwrite the one
     // that does.
     if (static_cast<uint8_t*>(camera)[0x1a] == 0) return;
-    void* owner = Native<void* (*)(void*)>(0x12a2140)(camera);
+    void* owner = Native<void* (*)(void*)>(g_offsets->camera_owner)(camera);
     if (!owner) return;
     using BinocularsFn = bool (*)(void*);
     const auto* vtable = *reinterpret_cast<BinocularsFn**>(owner);
-    const bool aiming = static_cast<uint8_t*>(owner)[0x2afa] != 0 || vtable[0x230 / 8](owner);
+    const bool sights = static_cast<uint8_t*>(owner)[0x2afa] != 0;
+    const bool binoculars = vtable[0x230 / 8](owner);
+    const bool aiming = sights || binoculars;
+    const bool weapon = OrientationDotWeaponOut();
+    static thread_local int lastState = -1;
+    const int state = (sights ? 1 : 0) | (binoculars ? 2 : 0) | (weapon ? 4 : 0);
+    if (state != lastState) {
+        lastState = state;
+        Log::Line("Aim state: sights=%d binoculars=%d weapon=%d", sights ? 1 : 0,
+                  binoculars ? 1 : 0, weapon ? 1 : 0);
+    }
     g_aiming.store(aiming, std::memory_order_relaxed);
     g_aimingStamp.store(GetTickCount64(), std::memory_order_relaxed);
 }
 
 void HookedUpdate(void* camera, float dt, unsigned flags) {
-    auto* extendedView = *reinterpret_cast<uint8_t**>(g_module + 0x6dc8960);
+    auto* extendedView = *reinterpret_cast<uint8_t**>(g_module + g_offsets->extended_view_instance);
     uint8_t inIronsight = 0;
     uint8_t aimAtGaze = 0;
     uint8_t binocularsAtGaze = 0;
@@ -168,6 +183,10 @@ void HookedUpdate(void* camera, float dt, unsigned flags) {
 void HookedRotation(void* extendedView, const Quat4* reference, Quat4* result) {
     g_rotation(extendedView, reference, result);
     g_updateContext.head_active = true;
+    const auto* quats = reinterpret_cast<const Quat4*>(static_cast<uint8_t*>(extendedView) + 0xf0);
+    NoteHeadDelta(quats[0], quats[1]);
+    g_updateContext.clean_view = quats[0];
+    g_updateContext.tracked_view = quats[1];
     if (!Mod::Instance().TrackingAllowed()) return;
 
     // The native HUD projection reads this quaternion separately from the camera.
@@ -184,15 +203,29 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
     RenderPose next;
     if (g_updateContext.head_active) {
         NoteOrientationDotGameplay();
+        {
+            // The clean aim, expressed in the rendered camera's own axes, projected.
+            const Quat4 delta = g_updateContext.tracked_view * g_updateContext.clean_view.Inverse();
+            const Vec3 aim = delta.Inverse().Rotate(camera->forward);
+            const float depth = Vec3::Dot(aim, camera->forward);
+            float fov;
+            std::memcpy(&fov, camera->settings + 0x0c, sizeof(fov));
+            const float tanV = std::tan(fov * 0.5f);
+            const float tanH = tanV * g_aspect.load(std::memory_order_relaxed);
+            if (depth > 0.01f && tanV > 0.0f) {
+                NoteOrientationDotProjection(Vec3::Dot(aim, camera->right) / depth / tanH,
+                                             -Vec3::Dot(aim, camera->up) / depth / tanV);
+            }
+        }
         next.camera = camera;
         next.eye = camera->eye;
         next.forward = camera->forward;
         next.pose = FramePump::Instance().Current();
         void* ignoredCollider = nullptr;
-        void* owner = Native<void* (*)(void*)>(0x12a2140)(g_updateContext.camera);
+        void* owner = Native<void* (*)(void*)>(g_offsets->camera_owner)(g_updateContext.camera);
         if (owner) {
-            void* body = Native<void* (*)(void*, unsigned)>(0xdf7ad0)(owner, 0);
-            if (body) ignoredCollider = Native<void* (*)(void*)>(0x2b9ee0)(body);
+            void* body = Native<void* (*)(void*, unsigned)>(g_offsets->owner_body)(owner, 0);
+            if (body) ignoredCollider = Native<void* (*)(void*)>(g_offsets->body_collider)(body);
         }
 
         static thread_local LeanClamp clamp;
@@ -204,7 +237,7 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
         float nearPlane;
         std::memcpy(&nearPlane, camera->settings + 4, sizeof(nearPlane));
         clamp.SetSettings({std::max(0.10f, nearPlane + 0.05f), 0.9f});
-        void* world = *reinterpret_cast<void**>(g_module + 0x6ac5798);
+        void* world = *reinterpret_cast<void**>(g_module + g_offsets->world);
         if (world) {
             // The world query requires the camera-update thread; rendering may run on a worker.
             QueryContext context{world, ignoredCollider};
@@ -215,6 +248,16 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
         }
         static thread_local unsigned frames = 0;
         if (++frames % 600 == 1) {
+            // The headlight turns by the difference of the extended view's rotations, so
+            // the rotation convention is checked against the camera it produced.
+            const Vec3 predicted = g_updateContext.tracked_view.Rotate(Vec3(0.0f, 1.0f, 0.0f));
+            Log::Line("View check: tracked rotation forward=%.3f,%.3f,%.3f camera forward=%.3f,%.3f,%.3f",
+                      predicted.x, predicted.y, predicted.z, camera->forward.x,
+                      camera->forward.y, camera->forward.z);
+            float fovs[4];
+            std::memcpy(fovs, camera->settings + 0x0c, sizeof(fovs));
+            Log::Line("View check: fov fields %.4f %.4f %.4f %.4f aspect %.4f", fovs[0], fovs[1],
+                      fovs[2], fovs[3], g_aspect.load(std::memory_order_relaxed));
             Log::Line("Render tracking: roll=%.2f lean=%.3f,%.3f,%.3f blocked=%d near=%.3f",
                       next.pose.rotation.roll_degrees, next.offset.x, next.offset.y,
                       next.offset.z, clamp.InContact() ? 1 : 0, nearPlane);
@@ -252,6 +295,9 @@ void HookedRender(const CameraParameters* camera, void* output, const float* vie
             }
         }
     }
+    // Only passes drawn from the player camera carry the frame's aspect; the probe
+    // passes rendered around the eye are square.
+    if (pose.camera) g_aspect.store(aspect, std::memory_order_relaxed);
     if (!pose.camera || !Mod::Instance().TrackingAllowed()) {
         g_render(camera, output, viewport, aspect, projection);
         return;
@@ -275,27 +321,20 @@ bool CameraAiming() {
 
 bool StartCameraAdapter() {
     auto* module = GetModuleHandleW(L"FC_m64d3d12.dll");
-    cameraunlock::memory::PeFingerprint fingerprint{};
-    constexpr cameraunlock::memory::PeFingerprint supported{0x6824d119, 0x1fb64000, 0x1ee4dd4b};
-    if (!cameraunlock::memory::ReadPeFingerprint(module, fingerprint) ||
-        !fingerprint.Matches(supported)) {
-        Log::Line("ERROR: unsupported camera module (%08X/%08X/%08X); tracking disabled",
-                  fingerprint.TimeDateStamp, fingerprint.SizeOfImage, fingerprint.CheckSum);
-        return false;
-    }
+    const BuildProfile* profile = MatchRunningBuild(module);
+    if (!profile) return false;
     g_module = reinterpret_cast<uintptr_t>(module);
-    constexpr struct { uintptr_t rva; uint32_t hash; } checks[] = {
-        {0x12d8d10, 0xd4da43f5}, {0x29681b0, 0xfed8b6c2}, {0x4087e0, 0x1a9cc877},
-        {0x5874d0, 0xc873c642}, {0xa97520, 0xfed2a23f}, {0xa6c4b0, 0xd3825632},
-        {0xa71800, 0xafc3f51f}, {0x9edf70, 0x3aaf89f3}, {0x12a2140, 0xee726436},
-        {0xdf7ad0, 0x8ca36122}, {0x2b9ee0, 0x66cd8ae6}, {0x12d9714, 0xd157382e},
-        {0x12d9754, 0x4eaa089f},
-    };
-    for (const auto& check : checks) {
+    g_offsets = profile->offsets;
+    const Offsets& o = *g_offsets;
+    for (const NativeFunction& check :
+         {o.camera_update, o.extended_view_rotation, o.set_camera_angles, o.render_camera,
+          o.world_ray_query, o.query_filter_construct, o.query_filter_destroy,
+          o.query_hits_destroy, o.camera_owner, o.owner_body, o.body_collider, o.sights_read,
+          o.binoculars_call}) {
         const auto* bytes = reinterpret_cast<const uint8_t*>(g_module + check.rva);
         uint32_t hash = 2166136261u;
         for (size_t i = 0; i < 32; ++i) hash = (hash ^ bytes[i]) * 16777619u;
-        if (hash != check.hash) {
+        if (hash != check.prefix_hash) {
             Log::Line("ERROR: camera function verification failed at %llX; tracking disabled",
                       static_cast<unsigned long long>(check.rva));
             return false;
@@ -309,10 +348,10 @@ bool StartCameraAdapter() {
     }
     struct Hook { uintptr_t rva; void* detour; void** original; };
     const std::array<Hook, 4> targets{{
-        {0x12d8d10, reinterpret_cast<void*>(&HookedUpdate), reinterpret_cast<void**>(&g_update)},
-        {0x29681b0, reinterpret_cast<void*>(&HookedRotation), reinterpret_cast<void**>(&g_rotation)},
-        {0x4087e0, reinterpret_cast<void*>(&HookedSetAngles), reinterpret_cast<void**>(&g_setAngles)},
-        {0x5874d0, reinterpret_cast<void*>(&HookedRender), reinterpret_cast<void**>(&g_render)},
+        {o.camera_update.rva, reinterpret_cast<void*>(&HookedUpdate), reinterpret_cast<void**>(&g_update)},
+        {o.extended_view_rotation.rva, reinterpret_cast<void*>(&HookedRotation), reinterpret_cast<void**>(&g_rotation)},
+        {o.set_camera_angles.rva, reinterpret_cast<void*>(&HookedSetAngles), reinterpret_cast<void**>(&g_setAngles)},
+        {o.render_camera.rva, reinterpret_cast<void*>(&HookedRender), reinterpret_cast<void**>(&g_render)},
     }};
     size_t created = 0;
     for (const auto& target : targets) {
@@ -337,7 +376,7 @@ bool StartCameraAdapter() {
         return false;
     }
     Log::Line("Camera adapter active: native yaw/pitch, render roll and collision-clamped XYZ");
-    return StartOrientationDot(g_module);
+    return StartOrientationDot(g_module, o) && StartHeadlight(g_module, o);
 }
 
 }  // namespace FarCry6HeadTracking

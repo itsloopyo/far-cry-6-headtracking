@@ -4,8 +4,9 @@
 # it so uninstall can put it back.
 #
 # Usage: deploy.ps1 [GAME_PATH] [-Configuration Debug|Release]
-# Game detection order matches install.cmd: explicit path -> FAR_CRY_6_PATH env
-# var -> store lookups -> games.json, all of it through core's Find-GamePath.
+# With no path, every install core's Find-AllGamePaths finds (FAR_CRY_6_PATH, Steam,
+# Ubisoft Connect, ...) is deployed to, so a Steam and a Ubisoft copy on one machine
+# both get the build.
 #
 # The game ships two copies of its binaries, bin\ and bin_plus\, and which one the
 # launcher starts depends on the edition and installed content. Both are deployed so
@@ -31,12 +32,14 @@ if (-not (Test-Path $built)) {
     exit 1
 }
 
-if (-not $GamePath) {
+if ($GamePath) {
+    $gamePaths = @($GamePath)
+} else {
     Import-Module (Join-Path $repo 'cameraunlock-core/powershell/GamePathDetection.psm1') -Force
-    $GamePath = Find-GamePath -GameId 'far-cry-6'
+    $gamePaths = @(Find-AllGamePaths -GameId 'far-cry-6')
 }
 
-if (-not $GamePath -or -not (Test-Path $GamePath)) {
+if ($gamePaths.Count -eq 0) {
     Write-Error "Could not locate Far Cry 6. Set FAR_CRY_6_PATH or pass the install path as the first argument."
     exit 1
 }
@@ -45,12 +48,20 @@ if (-not $GamePath -or -not (Test-Path $GamePath)) {
 # that yields nothing gives $null and one that yields a single item gives a bare
 # string, and .Count throws a property error on BOTH - so an ordinary install with
 # a bin\ and no bin_plus\ threw instead of deploying. Do not simplify this out.
-$targets = @(@("bin", "bin_plus") | ForEach-Object { Join-Path $GamePath $_ } |
-    Where-Object { Test-Path $_ })
-if ($targets.Count -eq 0) {
-    Write-Error "No bin or bin_plus directory under $GamePath."
-    exit 1
-}
+$targets = @(foreach ($path in $gamePaths) {
+    if (-not (Test-Path $path)) {
+        Write-Error "Far Cry 6 path does not exist: $path"
+        exit 1
+    }
+    $dirs = @(@("bin", "bin_plus") | ForEach-Object { Join-Path $path $_ } |
+        Where-Object { Test-Path $_ })
+    if ($dirs.Count -eq 0) {
+        Write-Error "No bin or bin_plus directory under $path."
+        exit 1
+    }
+    Write-Host "Far Cry 6 install: $path" -ForegroundColor Cyan
+    $dirs
+})
 
 foreach ($dir in $targets) {
     $live = Join-Path $dir "tobii_gameintegration_x64.dll"
