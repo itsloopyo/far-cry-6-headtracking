@@ -2,7 +2,7 @@
   "schema_version": 2,
   "mod_info": {
     "name": "FarCry6HeadTracking",
-    "version": "0.0.0",
+    "version": "0.1.0",
     "game_id": "far-cry-6"
   },
   "strategy": "Shim",

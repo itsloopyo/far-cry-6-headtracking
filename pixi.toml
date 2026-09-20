@@ -1,6 +1,6 @@
 [workspace]
 name = "far-cry-6-head-tracking"
-version = "0.0.0"
+version = "0.1.0"
 description = "Head tracking mod for Far Cry 6 using OpenTrack"
 license = "MIT"
 channels = ["conda-forge"]
