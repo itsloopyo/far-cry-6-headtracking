@@ -45,12 +45,17 @@ const Offsets* g_offsets = nullptr;
 
 struct UpdateContext {
     void* camera = nullptr;
+    void* extended_view = nullptr;
     float dt = 0.0f;
     bool head_active = false;
     Quat4 clean_view;
     Quat4 tracked_view;
+    Quat4 yaw_correction;
 };
-std::atomic<float> g_aspect{16.0f / 9.0f};
+
+// Width over height of the drawn frame, read from the viewport the render builder
+// divides for its own projection.
+std::atomic<float> g_frameAspect{16.0f / 9.0f};
 thread_local UpdateContext g_updateContext;
 
 struct RenderPose {
@@ -59,6 +64,7 @@ struct RenderPose {
     Vec3 eye;
     Vec3 forward;
     tobii::Transformation pose{};
+    Quat4 yaw_correction;
     Vec3 offset;
 };
 
@@ -122,11 +128,41 @@ LeanObstruction QueryLean(void* context, const Vec3& start,
     return result;
 }
 
+// How far along the clean aim the shot stops. The reticle marks that POINT: with the
+// eye leaned off the gun, a direction alone projects to a different place, and the
+// mark slides off the thing it sits on, worse the closer the surface.
+float AimDistance(const QueryContext& query, const Vec3& start, const Vec3& direction,
+                  float reach) {
+    QueryFilter filter{};
+    Native<void (*)(QueryFilter*, uint32_t, uint32_t)>(g_offsets->query_filter_construct)(&filter, 0x2dbf, 0);
+    QueryHits hits;
+    const Vec3 segment = direction * reach;
+    Native<void (*)(void*, const Vec3*, const Vec3*, QueryHits*, const QueryFilter*,
+                    void*, uint32_t, bool)>(g_offsets->world_ray_query)(
+        query.world, &start, &segment, &hits, &filter, query.ignored_collider, 0x13, false);
+    float nearest = reach;
+    for (uint32_t i = 0; i < (hits.count & 0x7fffffff); ++i) {
+        Vec3 point;
+        std::memcpy(&point, hits.data + i * 0x40, sizeof(point));
+        // Measured from the contact's own position along the aim, so it is a distance
+        // by construction rather than a field that might mean something else.
+        const float distance = Vec3::Dot(point - start, direction);
+        if (distance > 0.05f) nearest = std::min(nearest, distance);
+    }
+    Native<void (*)(QueryHits*)>(g_offsets->query_hits_destroy)(&hits);
+    Native<void (*)(QueryFilter*)>(g_offsets->query_filter_destroy)(&filter);
+    return nearest;
+}
+
 // The camera update resolves the owner through camera_owner and ORs two answers into
 // its aim state: the byte at +0x2afa is the sights (read at sights_read) and virtual
-// slot 0x230 is the binoculars (called at binoculars_call). That aim state is what the
-// update pauses the extended view on when the profile's ExtendedViewInIronsight is
-// off, so it is the game's own definition of aiming.
+// slot 0x230 (called at binoculars_call) is the sight device, which in this game is
+// the phone - Far Cry 6 has no binoculars. That aim state is what the update pauses
+// the extended view on when the profile's ExtendedViewInIronsight is off.
+//
+// The mod's own definition is narrower. The sights byte is set by the aim button even
+// with nothing in hand, which has no sights to settle onto, and the phone is a screen
+// the player reads rather than a sight to settle onto, so neither pauses the view.
 void PublishAiming(void* camera) {
     // The update itself skips a camera whose +0x1a is clear before it asks for the
     // owner. A camera with no owner has no aim state, and must not overwrite the one
@@ -134,18 +170,18 @@ void PublishAiming(void* camera) {
     if (static_cast<uint8_t*>(camera)[0x1a] == 0) return;
     void* owner = Native<void* (*)(void*)>(g_offsets->camera_owner)(camera);
     if (!owner) return;
-    using BinocularsFn = bool (*)(void*);
-    const auto* vtable = *reinterpret_cast<BinocularsFn**>(owner);
+    using SightDeviceFn = bool (*)(void*);
+    const auto* vtable = *reinterpret_cast<SightDeviceFn**>(owner);
     const bool sights = static_cast<uint8_t*>(owner)[0x2afa] != 0;
-    const bool binoculars = vtable[0x230 / 8](owner);
-    const bool aiming = sights || binoculars;
+    const bool phone = vtable[0x230 / 8](owner);
     const bool weapon = OrientationDotWeaponOut();
+    const bool aiming = sights && weapon;
     static thread_local int lastState = -1;
-    const int state = (sights ? 1 : 0) | (binoculars ? 2 : 0) | (weapon ? 4 : 0);
+    const int state = (sights ? 1 : 0) | (phone ? 2 : 0) | (weapon ? 4 : 0);
     if (state != lastState) {
         lastState = state;
-        Log::Line("Aim state: sights=%d binoculars=%d weapon=%d", sights ? 1 : 0,
-                  binoculars ? 1 : 0, weapon ? 1 : 0);
+        Log::Line("Aim state: sights=%d phone=%d weapon=%d", sights ? 1 : 0, phone ? 1 : 0,
+                  weapon ? 1 : 0);
     }
     g_aiming.store(aiming, std::memory_order_relaxed);
     g_aimingStamp.store(GetTickCount64(), std::memory_order_relaxed);
@@ -169,7 +205,9 @@ void HookedUpdate(void* camera, float dt, unsigned flags) {
         inIronsight = extendedView[0x61];
         extendedView[0x61] = 1;
     }
-    g_updateContext = {camera, dt, false};
+    g_updateContext = UpdateContext{};
+    g_updateContext.camera = camera;
+    g_updateContext.dt = dt;
     g_update(camera, dt, flags);
     PublishAiming(camera);
     g_updateContext = {};
@@ -183,11 +221,21 @@ void HookedUpdate(void* camera, float dt, unsigned flags) {
 void HookedRotation(void* extendedView, const Quat4* reference, Quat4* result) {
     g_rotation(extendedView, reference, result);
     g_updateContext.head_active = true;
+    g_updateContext.extended_view = extendedView;
     const auto* quats = reinterpret_cast<const Quat4*>(static_cast<uint8_t*>(extendedView) + 0xf0);
-    NoteHeadDelta(quats[0], quats[1]);
     g_updateContext.clean_view = quats[0];
     g_updateContext.tracked_view = quats[1];
-    if (!Mod::Instance().TrackingAllowed()) return;
+    const bool trackingAllowed = Mod::Instance().TrackingAllowed();
+    g_updateContext.yaw_correction = Quat4::Identity();
+    if (trackingAllowed && !Mod::Instance().WorldSpaceYaw()) {
+        // The native rotation applies +0xd0 about reference up, then +0xd4 about
+        // local X. Use its applied yaw, including its pause and ADS blending.
+        float yaw;
+        std::memcpy(&yaw, static_cast<const uint8_t*>(extendedView) + 0xd0, sizeof(yaw));
+        g_updateContext.yaw_correction = LocalYawCorrection(quats[0], *reference, yaw);
+    }
+    NoteHeadDelta(quats[0], g_updateContext.yaw_correction * quats[1]);
+    if (!trackingAllowed) return;
 
     // The native HUD projection reads this quaternion separately from the camera.
     const float halfRoll = -FramePump::Instance().Current().rotation.roll_degrees *
@@ -203,24 +251,13 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
     RenderPose next;
     if (g_updateContext.head_active) {
         NoteOrientationDotGameplay();
-        {
-            // The clean aim, expressed in the rendered camera's own axes, projected.
-            const Quat4 delta = g_updateContext.tracked_view * g_updateContext.clean_view.Inverse();
-            const Vec3 aim = delta.Inverse().Rotate(camera->forward);
-            const float depth = Vec3::Dot(aim, camera->forward);
-            float fov;
-            std::memcpy(&fov, camera->settings + 0x0c, sizeof(fov));
-            const float tanV = std::tan(fov * 0.5f);
-            const float tanH = tanV * g_aspect.load(std::memory_order_relaxed);
-            if (depth > 0.01f && tanV > 0.0f) {
-                NoteOrientationDotProjection(Vec3::Dot(aim, camera->right) / depth / tanH,
-                                             -Vec3::Dot(aim, camera->up) / depth / tanV);
-            }
-        }
         next.camera = camera;
         next.eye = camera->eye;
         next.forward = camera->forward;
         next.pose = FramePump::Instance().Current();
+        next.yaw_correction = g_updateContext.yaw_correction;
+        CameraParameters yawCamera = *camera;
+        RotateCameraBasis(yawCamera, next.yaw_correction);
         void* ignoredCollider = nullptr;
         void* owner = Native<void* (*)(void*)>(g_offsets->camera_owner)(g_updateContext.camera);
         if (owner) {
@@ -241,23 +278,68 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
         if (world) {
             // The world query requires the camera-update thread; rendering may run on a worker.
             QueryContext context{world, ignoredCollider};
-            next.offset = clamp.Apply(camera->eye, CameraLean(*camera, next.pose.position),
+            next.offset = clamp.Apply(camera->eye, CameraLean(yawCamera, next.pose.position),
                                       g_updateContext.dt, QueryLean, &context);
         } else {
             Log::Line("ERROR: camera world query unavailable; positional tracking suppressed");
+        }
+
+        // The reticle, projected basis to basis from the camera the frame is drawn
+        // with: the leaned eye and the rolled axes the render hook writes.
+        if (world) {
+            constexpr float kReach = 500.0f;
+            const Quat4 delta = g_updateContext.tracked_view * g_updateContext.clean_view.Inverse();
+            const Vec3 aim = delta.Inverse().Rotate(camera->forward);
+            QueryContext context{world, ignoredCollider};
+            const float distance = AimDistance(context, camera->eye, aim, kReach);
+            const Vec3 impact = camera->eye + aim * distance;
+            CameraParameters nativeRolled = *camera;
+            ApplyCameraRoll(nativeRolled, next.pose.rotation.roll_degrees);
+            CameraParameters rolled = yawCamera;
+            ApplyCameraRoll(rolled, next.pose.rotation.roll_degrees);
+            float fov;
+            std::memcpy(&fov, camera->settings + 0x0c, sizeof(fov));
+            // +0x0c is the horizontal field of view: at yaw 15 and pitch 10 the rotation
+            // term matches the weapon's own reticle position exactly.
+            const float tanH = std::tan(fov * 0.5f);
+            const float tanV = tanH / g_frameAspect.load(std::memory_order_relaxed);
+            const Vec3 leaned = impact - (camera->eye + next.offset);
+            const Vec3 straight = impact - camera->eye;
+            const float depth = Vec3::Dot(leaned, rolled.forward);
+            const float straightDepth = Vec3::Dot(straight, nativeRolled.forward);
+            if (tanH > 0.0f && depth > 0.05f && straightDepth > 0.05f) {
+                const float x = Vec3::Dot(leaned, rolled.right) / depth / tanH;
+                const float y = -Vec3::Dot(leaned, rolled.up) / depth / tanV;
+                const float rotX = Vec3::Dot(straight, nativeRolled.right) / straightDepth / tanH;
+                const float rotY = -Vec3::Dot(straight, nativeRolled.up) / straightDepth / tanV;
+                NoteOrientationDotAim(x, y, x - rotX, y - rotY);
+
+                static thread_local unsigned aimFrames = 0;
+                if (++aimFrames % 300 == 1) {
+                    Log::Line("AIMGEO dist=%.2f lean=(%.3f,%.3f,%.3f) rot=(%.4f,%.4f) "
+                              "full=(%.4f,%.4f) parallax=(%.4f,%.4f)",
+                              distance, next.offset.x, next.offset.y, next.offset.z, rotX, rotY,
+                              x, y, x - rotX, y - rotY);
+                }
+            }
         }
         static thread_local unsigned frames = 0;
         if (++frames % 600 == 1) {
             // The headlight turns by the difference of the extended view's rotations, so
             // the rotation convention is checked against the camera it produced.
             const Vec3 predicted = g_updateContext.tracked_view.Rotate(Vec3(0.0f, 1.0f, 0.0f));
+            Log::Line("Yaw check: mode=%s correction=%.4f,%.4f,%.4f,%.4f forward=%.4f,%.4f,%.4f",
+                      Mod::Instance().WorldSpaceYaw() ? "world" : "local",
+                      next.yaw_correction.x, next.yaw_correction.y,
+                      next.yaw_correction.z, next.yaw_correction.w,
+                      yawCamera.forward.x, yawCamera.forward.y, yawCamera.forward.z);
             Log::Line("View check: tracked rotation forward=%.3f,%.3f,%.3f camera forward=%.3f,%.3f,%.3f",
                       predicted.x, predicted.y, predicted.z, camera->forward.x,
                       camera->forward.y, camera->forward.z);
             float fovs[4];
             std::memcpy(fovs, camera->settings + 0x0c, sizeof(fovs));
-            Log::Line("View check: fov fields %.4f %.4f %.4f %.4f aspect %.4f", fovs[0], fovs[1],
-                      fovs[2], fovs[3], g_aspect.load(std::memory_order_relaxed));
+            Log::Line("View check: fov fields %.4f %.4f %.4f %.4f", fovs[0], fovs[1], fovs[2],
+                      fovs[3]);
             Log::Line("Render tracking: roll=%.2f lean=%.3f,%.3f,%.3f blocked=%d near=%.3f",
                       next.pose.rotation.roll_degrees, next.offset.x, next.offset.y,
                       next.offset.z, clamp.InContact() ? 1 : 0, nearPlane);
@@ -295,9 +377,9 @@ void HookedRender(const CameraParameters* camera, void* output, const float* vie
             }
         }
     }
-    // Only passes drawn from the player camera carry the frame's aspect; the probe
-    // passes rendered around the eye are square.
-    if (pose.camera) g_aspect.store(aspect, std::memory_order_relaxed);
+    if (pose.camera && viewport[1] > 0.0f) {
+        g_frameAspect.store(viewport[0] / viewport[1], std::memory_order_relaxed);
+    }
     if (!pose.camera || !Mod::Instance().TrackingAllowed()) {
         g_render(camera, output, viewport, aspect, projection);
         return;
@@ -305,6 +387,7 @@ void HookedRender(const CameraParameters* camera, void* output, const float* vie
 
     // Only the render builder sees the modified copy. Repeated passes start clean.
     CameraParameters tracked = *camera;
+    RotateCameraBasis(tracked, pose.yaw_correction);
     ApplyCameraRoll(tracked, pose.pose.rotation.roll_degrees);
     tracked.eye = tracked.eye + pose.offset;
     g_render(&tracked, output, viewport, aspect, projection);
@@ -380,4 +463,3 @@ bool StartCameraAdapter() {
 }
 
 }  // namespace FarCry6HeadTracking
-

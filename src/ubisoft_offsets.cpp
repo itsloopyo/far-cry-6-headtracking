@@ -23,6 +23,7 @@ constexpr Offsets kOffsets_20250514 = {
     {0x30bb060, 0x8812c97c},  // reticle_visibility
     {0x27ee100, 0x9196e66a},  // reticle_position
     {0x3089e50, 0x0683cfc9},  // reticle_destroy
+    {0x2777930, 0xcb643b5c},  // reticle_publish_position
     {0x14b9c10, 0x95cb8be8},  // flashlight_spawn
     {0x14a7150, 0xbed0683d},  // flashlight_destroy
     {0xff5b80, 0x74840edc},   // set_world_matrix

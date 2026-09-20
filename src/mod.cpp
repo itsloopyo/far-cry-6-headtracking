@@ -75,6 +75,8 @@ bool Mod::LoadConfiguration() {
     }
     m_iniPath = iniPath;
     m_adsMode.store(m_cfg.ads_mode, std::memory_order_relaxed);
+    m_worldSpaceYaw.store(m_cfg.world_space_yaw, std::memory_order_relaxed);
+    Log::Line("Yaw mode: %s", m_cfg.world_space_yaw ? "world" : "camera-local");
     Log::Line("Config loaded from %s", iniPath.c_str());
     Log::Line("%s", FarCry6AdsModeDescription(m_cfg.ads_mode));
     Log::Line("Port %u, enable on startup %s, position %s, disable in co-op %s",
@@ -209,6 +211,17 @@ bool Mod::TrackingAllowed() const {
     if (m_paused.load(std::memory_order_relaxed)) return false;
     if (m_cfg.disable_in_coop && m_inCoop.load(std::memory_order_relaxed)) return false;
     return true;
+}
+
+void Mod::ToggleYawMode() {
+    const bool world = !WorldSpaceYaw();
+    m_worldSpaceYaw.store(world, std::memory_order_relaxed);
+    if (!WritePrivateProfileStringA("Gameplay", "WorldSpaceYaw", world ? "1" : "0",
+                                    m_iniPath.c_str())) {
+        Log::Line("ERROR: could not save WorldSpaceYaw to %s (error %lu)",
+                  m_iniPath.c_str(), GetLastError());
+    }
+    Log::Line("Yaw mode: %s", world ? "world" : "camera-local");
 }
 
 }  // namespace FarCry6HeadTracking

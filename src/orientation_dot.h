@@ -12,9 +12,10 @@ namespace FarCry6HeadTracking {
 bool StartOrientationDot(uintptr_t module, const Offsets& offsets);
 void NoteOrientationDotGameplay();
 
-// Where the clean aim lands in the head-tracked view, in centred normalised screen
-// space (x right, y down). Used when no weapon is out to report its own reticle.
-void NoteOrientationDotProjection(float x, float y);
+// Where the shot lands, projected into the frame the player sees: centred and
+// normalised (x right, y down), the same space the weapon reports its reticle in.
+// `parallaxX/Y` correct the native projection for lean and the yaw-axis switch.
+void NoteOrientationDotAim(float x, float y, float parallaxX, float parallaxY);
 
 // True while a weapon is updating its reticle position.
 bool OrientationDotWeaponOut();

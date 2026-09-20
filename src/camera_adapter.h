@@ -6,6 +6,6 @@
 namespace FarCry6HeadTracking {
 bool StartCameraAdapter();
 
-// Whether the player has the sights or binoculars up, as of the last camera update.
+// Whether the player has a weapon's sights up, as of the last camera update.
 bool CameraAiming();
 }

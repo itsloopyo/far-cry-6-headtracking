@@ -38,6 +38,8 @@ constexpr bool  kDefaultDisableInCoop   = true;
 
 constexpr int   kDefaultVkToggle        = 0x23; // VK_END
 constexpr int   kDefaultVkCycleMode     = 0x21; // VK_PRIOR (Page Up)
+constexpr int   kDefaultVkYawMode       = 0x22;
+constexpr bool  kDefaultWorldSpaceYaw   = true;
 
 struct Config {
     bool enabled_on_startup = kDefaultEnableOnStartup;
@@ -74,10 +76,12 @@ struct Config {
 
     bool disable_in_coop = kDefaultDisableInCoop;
     AdsMode ads_mode = kDefaultAdsMode;
+    bool world_space_yaw = kDefaultWorldSpaceYaw;
 
     int vk_toggle = kDefaultVkToggle;
     int vk_cycle_mode = kDefaultVkCycleMode;
     int vk_ads_mode = kDefaultVkAdsMode;
+    int vk_yaw_mode = kDefaultVkYawMode;
 
     bool LoadOrCreate(const char* iniPath);
 };

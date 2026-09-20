@@ -132,6 +132,31 @@ void TestRenderAxes() {
     CheckNear(turnedLean.y, 0.25f, "side lean follows camera heading");
 }
 
+void TestLocalYaw() {
+    using cameraunlock::math::Quat4;
+    const Quat4 clean(0.5f, 0.0f, 0.0f, std::sqrt(0.75f));
+    const Quat4 yaw(0.0f, 0.0f, -std::sqrt(0.5f), std::sqrt(0.5f));
+    CameraParameters camera{};
+    camera.eye = {1.0f, 2.0f, 3.0f};
+    const Quat4 native = yaw * clean;
+    camera.forward = native.Rotate({0.0f, 1.0f, 0.0f});
+    camera.up = native.Rotate({0.0f, 0.0f, 1.0f});
+    camera.right = native.Rotate({1.0f, 0.0f, 0.0f});
+    CheckNear(camera.forward.z, std::sqrt(0.75f), "world yaw preserves elevation");
+    RotateCameraBasis(camera, LocalYawCorrection(clean, Quat4::Identity(),
+                                                 -1.57079632679f));
+    CheckNear(camera.forward.x, 1.0f, "local quarter turn looks along camera right");
+    CheckNear(camera.forward.y, 0.0f, "local quarter turn removes forward component");
+    CheckNear(camera.forward.z, 0.0f, "local yaw follows tilted camera up");
+    CheckNear(camera.up.y, -std::sqrt(0.75f), "local yaw preserves tilted up axis");
+    CheckNear(camera.up.z, 0.5f, "local yaw preserves tilted up elevation");
+    CheckNear(camera.eye.x, 1.0f, "yaw correction leaves eye position alone");
+    CheckNear(LocalYawCorrection(clean, clean, -1.0f).w, 1.0f,
+              "equal reference and camera axes need no correction");
+    CheckNear(LocalYawCorrection(clean, Quat4::Identity(), 0.0f).w, 1.0f,
+              "zero yaw needs no correction");
+}
+
 // Metres in, millimetres out, because that is the unit the extended view axis
 // limits are named in (XRightMm, YUpMm, ZBackMm).
 void TestPositionUnitsAndSigns() {
@@ -287,6 +312,8 @@ void TestConfigPort() {
     Config created;
     Check(created.LoadOrCreate(path.c_str()), "a missing INI is created and read");
     Check(created.udp_port == kDefaultPort, "the created INI carries the default port");
+    Check(created.world_space_yaw && created.vk_yaw_mode == 0x22,
+          "the generated INI defaults to world yaw and Page Down");
 
     FILE* f = std::fopen(path.c_str(), "w");
     Check(f != nullptr, "the test INI can be rewritten");
@@ -300,11 +327,14 @@ void TestConfigPort() {
     f = std::fopen(path.c_str(), "w");
     Check(f != nullptr, "the test INI can be rewritten for the limit case");
     if (f) {
-        std::fputs("[General]\nPort=4242\n[Position]\nLimitZ=-1\n", f);
+        std::fputs("[General]\nPort=4242\n[Position]\nLimitZ=-1\n"
+                   "[Gameplay]\nWorldSpaceYaw=0\n[Hotkeys]\nYawMode=0x70\n", f);
         std::fclose(f);
     }
     Config recovered;
     Check(recovered.LoadOrCreate(path.c_str()), "a bad limit still loads");
+    Check(!recovered.world_space_yaw && recovered.vk_yaw_mode == 0x70,
+          "saved local yaw and a rebound yaw key load from the INI");
     CheckNear(recovered.pos_limit_z, kDefaultPosLimitZ, "a negative LimitZ falls back");
 
     // ReadInt answers 0 for a present but unparseable value rather than the
@@ -687,7 +717,8 @@ void TestAdsPausedKeepsRoll() {
 }
 
 // tracked: the same settle onto the sights, then tracking measured from the pose the
-// sights came up on, with roll absolute and no step when they come back down.
+// sights came up on for the aim axes, with roll and the lean absolute, and no step
+// when the sights come back down.
 void TestAdsTrackedFromEntry() {
     using cameraunlock::ads::AdsFade;
     AdsPose ads;
@@ -701,8 +732,10 @@ void TestAdsTrackedFromEntry() {
     CheckNear(aimed.rotation.yaw_degrees, 10.0f, "tracked yaw is measured from entry");
     CheckNear(aimed.rotation.pitch_degrees, 6.0f, "tracked pitch is measured from entry");
     CheckNear(aimed.rotation.roll_degrees, 5.0f, "tracked roll stays absolute");
-    CheckNear(aimed.position.x, 5.0f, "tracked lean is measured from entry (x)");
-    CheckNear(aimed.position.z, 10.0f, "tracked lean is measured from entry (z)");
+    // The lean is where the player's head physically is, so it carries into the aim
+    // rather than being measured from the frame the sights came up on.
+    CheckNear(aimed.position.x, 35.0f, "tracked lean stays absolute (x)");
+    CheckNear(aimed.position.z, 50.0f, "tracked lean stays absolute (z)");
 
     const tobii::Transformation released =
         ads.Apply(AdsMode::Tracked, false, true, moved, up + 1);
@@ -732,6 +765,7 @@ int main() {
     TestRotationSigns();
     TestExtendedViewRadians();
     TestRenderAxes();
+    TestLocalYaw();
     TestPositionUnitsAndSigns();
     TestEmptySampleIsIdentity();
     TestChannelsAreIndependent();

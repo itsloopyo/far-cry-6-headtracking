@@ -54,6 +54,8 @@ public:
     // landed on. Runs on the hotkey thread; the frame pump reads the mode afresh
     // every frame, so a change mid-aim applies to that aim.
     void CycleAdsMode();
+    bool WorldSpaceYaw() const { return m_worldSpaceYaw.load(std::memory_order_relaxed); }
+    void ToggleYawMode();
 
     void OpenLog();
 
@@ -77,6 +79,7 @@ private:
     std::atomic<bool> m_inCoop{false};
     std::atomic<bool> m_coopGateActive{false};
     std::atomic<AdsMode> m_adsMode{kDefaultAdsMode};
+    std::atomic<bool> m_worldSpaceYaw{kDefaultWorldSpaceYaw};
     std::string m_iniPath;
     Config m_cfg{};
     TrackingRuntime m_runtime;

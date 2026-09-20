@@ -27,9 +27,11 @@ using cameraunlock::rendering::DX12Overlay;
 using VisibilityFn = void (*)(void*);
 using PositionFn = void (*)(void*, float, void*);
 using DestroyFn = void (*)(void*);
+using PublishPositionFn = void (*)(void*, const float*);
 VisibilityFn g_visibility = nullptr;
 PositionFn g_position = nullptr;
 DestroyFn g_destroy = nullptr;
+PublishPositionFn g_publishPosition = nullptr;
 using Present1Fn = HRESULT (STDMETHODCALLTYPE*)(IDXGISwapChain1*, UINT, UINT,
                                                 const DXGI_PRESENT_PARAMETERS*);
 Present1Fn g_present1 = nullptr;
@@ -45,6 +47,8 @@ struct DotState {
     ULONGLONG native_stamp = 0;
     float projected_x = 0.0f;
     float projected_y = 0.0f;
+    float parallax_x = 0.0f;
+    float parallax_y = 0.0f;
     ULONGLONG projected_stamp = 0;
     ULONGLONG gameplay_stamp = 0;
 };
@@ -62,16 +66,33 @@ void HookedVisibility(void* reticle) {
     g_dot.stock_visible = visible;
 }
 
-// The weapon's own reticle position, which already carries the native extended view
-// compensation. It is only updated while a weapon is out.
+// +0xb74 is also the weapon's smoothing history. Publish the render correction
+// through its HUD property (+0x1340), without feeding it into the next update.
 void HookedPosition(void* weapon, float dt, void* player) {
     g_position(weapon, dt, player);
     float position[2];
     std::memcpy(position, static_cast<const uint8_t*>(weapon) + 0xb74, sizeof(position));
-    std::lock_guard<std::mutex> lock(g_mutex);
-    g_dot.native_x = position[0];
-    g_dot.native_y = position[1];
-    g_dot.native_stamp = GetTickCount64();
+    const float nativeX = position[0];
+    const float nativeY = position[1];
+    const ULONGLONG now = GetTickCount64();
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (now - g_dot.projected_stamp <= kFreshMs && Mod::Instance().TrackingAllowed() &&
+            Mod::Instance().Runtime().IsEnabled()) {
+            position[0] += g_dot.parallax_x;
+            position[1] += g_dot.parallax_y;
+        }
+        g_dot.native_x = position[0];
+        g_dot.native_y = position[1];
+        g_dot.native_stamp = now;
+    }
+    g_publishPosition(static_cast<uint8_t*>(weapon) + 0x1340, position);
+    static thread_local ULONGLONG lastLog = 0;
+    if (now - lastLog >= 1000) {
+        lastLog = now;
+        Log::Line("Reticle: weapon=%.4f,%.4f HUD=%.4f,%.4f", nativeX, nativeY,
+                  position[0], position[1]);
+    }
 }
 
 void HookedDestroy(void* reticle) {
@@ -89,7 +110,8 @@ void DrawDot(DX12DrawContext& dc) {
         dot = g_dot;
     }
     const auto now = GetTickCount64();
-    if (dot.stock_visible || !Mod::Instance().TrackingAllowed() ||
+    Mod& mod = Mod::Instance();
+    if (dot.stock_visible || !mod.TrackingAllowed() || !mod.Runtime().IsEnabled() ||
         now - dot.gameplay_stamp > kFreshMs) {
         return;
     }
@@ -110,10 +132,10 @@ void DrawDot(DX12DrawContext& dc) {
 
     const float x = (nx * 0.5f + 0.5f) * dc.Width();
     const float y = (ny * 0.5f + 0.5f) * dc.Height();
-    dc.DrawDot(x, y, 6.0f, 0x20000000);
-    dc.DrawDot(x, y, 5.0f, 0x20ffffff);
-    dc.DrawDot(x, y, 3.5f, 0x60ffffff);
-    dc.DrawDot(x, y, 2.0f, 0xa0ffffff);
+    dc.DrawDot(x, y, 4.8f, 0x20000000);
+    dc.DrawDot(x, y, 4.0f, 0x20ffffff);
+    dc.DrawDot(x, y, 2.8f, 0x60ffffff);
+    dc.DrawDot(x, y, 1.6f, 0xa0ffffff);
 }
 
 HRESULT STDMETHODCALLTYPE HookedPresent1(IDXGISwapChain1* swap, UINT sync, UINT flags,
@@ -177,12 +199,14 @@ void NoteOrientationDotGameplay() {
     }
 }
 
-void NoteOrientationDotProjection(float x, float y) {
+void NoteOrientationDotAim(float x, float y, float parallaxX, float parallaxY) {
     DotState dot;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         g_dot.projected_x = x;
         g_dot.projected_y = y;
+        g_dot.parallax_x = parallaxX;
+        g_dot.parallax_y = parallaxY;
         g_dot.projected_stamp = GetTickCount64();
         dot = g_dot;
     }
@@ -191,7 +215,7 @@ void NoteOrientationDotProjection(float x, float y) {
     const ULONGLONG now = dot.projected_stamp;
     if (now - dot.native_stamp <= kFreshMs && now - lastLog > 5000) {
         lastLog = now;
-        Log::Line("Dot check: native %.4f,%.4f projected %.4f,%.4f", dot.native_x, dot.native_y,
+        Log::Line("Dot check: weapon %.4f,%.4f projected %.4f,%.4f", dot.native_x, dot.native_y,
                   x, y);
     }
 }
@@ -202,6 +226,14 @@ bool OrientationDotWeaponOut() {
 }
 
 bool StartOrientationDot(uintptr_t module, const Offsets& offsets) {
+    const auto* publishBytes = reinterpret_cast<const uint8_t*>(module + offsets.reticle_publish_position.rva);
+    uint32_t publishHash = 2166136261u;
+    for (size_t i = 0; i < 32; ++i) publishHash = (publishHash ^ publishBytes[i]) * 16777619u;
+    if (publishHash != offsets.reticle_publish_position.prefix_hash) {
+        Log::Line("ERROR: reticle position publisher verification failed");
+        return false;
+    }
+    g_publishPosition = reinterpret_cast<PublishPositionFn>(module + offsets.reticle_publish_position.rva);
     struct Hook { NativeFunction target; void* detour; void** original; };
     const std::array<Hook, 3> targets{{
         {offsets.reticle_visibility, reinterpret_cast<void*>(&HookedVisibility),

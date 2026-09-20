@@ -6,6 +6,7 @@
 #include "tobii_abi.h"
 #include "cameraunlock/math/angle_utils.h"
 #include "cameraunlock/math/vec3.h"
+#include "cameraunlock/math/quat4.h"
 
 #include <cmath>
 #include <cstddef>
@@ -33,6 +34,22 @@ inline Vec3 CameraLean(const CameraParameters& camera, const tobii::Position& po
     return camera.right * (position.x * 0.001f) +
            camera.up * (position.y * 0.001f) -
            camera.forward * (position.z * 0.001f);
+}
+
+inline cameraunlock::math::Quat4 LocalYawCorrection(const cameraunlock::math::Quat4& clean,
+                                                   const cameraunlock::math::Quat4& reference,
+                                                   float yawRadians) {
+    using cameraunlock::math::Quat4;
+    const Quat4 yaw(0.0f, 0.0f, std::sin(yawRadians * 0.5f), std::cos(yawRadians * 0.5f));
+    const Quat4 local = clean * yaw * clean.Inverse();
+    const Quat4 world = reference * yaw * reference.Inverse();
+    return (local * world.Inverse()).Normalized();
+}
+
+inline void RotateCameraBasis(CameraParameters& camera, const cameraunlock::math::Quat4& rotation) {
+    camera.forward = rotation.Rotate(camera.forward);
+    camera.up = rotation.Rotate(camera.up);
+    camera.right = rotation.Rotate(camera.right);
 }
 
 inline void ApplyCameraRoll(CameraParameters& camera, float tobiiRollDegrees) {

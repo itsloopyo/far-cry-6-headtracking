@@ -34,6 +34,7 @@ void StartHotkeys(const Config& cfg, TrackingRuntime& runtime) {
     auto onToggle = [&runtime]() { runtime.ToggleEnabled(); };
     auto onCycleMode = [&runtime]() { runtime.CycleTrackingMode(); };
     auto onCycleAds = []() { Mod::Instance().CycleAdsMode(); };
+    auto onYawMode = []() { Mod::Instance().ToggleYawMode(); };
 
     const bool cycleKeyBound = cfg.vk_cycle_mode != cfg.vk_toggle;
 
@@ -67,6 +68,15 @@ void StartHotkeys(const Config& cfg, TrackingRuntime& runtime) {
     g_poller.AddHotkey('Y', ChordGuarded(onToggle));
     g_poller.AddHotkey('G', ChordGuarded(onCycleMode));
     g_poller.AddHotkey('U', ChordGuarded(onCycleAds));
+    g_poller.AddHotkey('H', ChordGuarded(onYawMode));
+    if (cfg.vk_yaw_mode != cfg.vk_toggle && cfg.vk_yaw_mode != cfg.vk_cycle_mode &&
+        cfg.vk_yaw_mode != cfg.vk_ads_mode) {
+        g_poller.AddHotkey(cfg.vk_yaw_mode, NavGuarded(onYawMode));
+        Log::Line("Yaw mode hotkey: 0x%02X (or Ctrl+Shift+H)", cfg.vk_yaw_mode);
+    } else {
+        Log::Line("WARN: yaw mode key 0x%02X is already bound; use Ctrl+Shift+H",
+                  cfg.vk_yaw_mode);
+    }
 
     // The poller rethrows std::system_error when the process cannot spawn its
     // thread, deliberately, so the failure is not silent. Catch it here: this runs

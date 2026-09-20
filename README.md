@@ -13,9 +13,10 @@ An unofficial head tracking mod for Far Cry 6 that moves the view with your head
 
 ## Requirements
 
-- **[Far Cry 6](https://store.ubisoft.com/us/far-cry-6/)** on PC, from Ubisoft
-  Connect. The game folder must contain `bin\FarCry6.exe` and
-  `bin\tobii_gameintegration_x64.dll`.
+- **[Far Cry 6](https://store.ubisoft.com/us/far-cry-6/)** on PC, from Steam or from
+  Ubisoft Connect. The PC Game Pass copy installs and launches through Ubisoft
+  Connect, so it is the Ubisoft Connect build. The game folder must contain
+  `bin\FarCry6.exe` and `bin\tobii_gameintegration_x64.dll`.
 - **Something that sends the OpenTrack UDP pose** -
   [OpenTrack](https://github.com/opentrack/opentrack/releases) itself with a
   webcam, or a phone app or hardware tracker configured to send that protocol.
@@ -140,6 +141,7 @@ Two equivalent binding sets, use whichever your keyboard has:
 |---------------------|-------------|-----------------|
 | Toggle tracking     | `End`       | `Ctrl+Shift+Y`  |
 | Cycle tracking mode | `Page Up`   | `Ctrl+Shift+G`  |
+| Switch world/local yaw | `Page Down` | `Ctrl+Shift+H` |
 
 `Page Up` / `Ctrl+Shift+G` cycles tracking mode:
 
@@ -147,6 +149,12 @@ Two equivalent binding sets, use whichever your keyboard has:
 2. Positional tracking disabled, rotational tracking enabled
 3. Rotational tracking disabled, positional tracking enabled
 4. Back to normal
+
+`Page Down` switches yaw between the game's reference up axis (world) and the
+camera's up axis (local). The difference is visible when looking up or down with
+the mouse or controller, then turning your head. The selection is saved as
+`[Gameplay] WorldSpaceYaw` (`1` for world, `0` for local). Rebind the key with
+`[Hotkeys] YawMode` (default `0x22`).
 
 ## Configuration
 
@@ -201,11 +209,13 @@ InvertZ=0
 ; Hold the view still while another player is in the session, so co-op runs
 ; the stock camera. Set to 0 to keep head tracking in co-op.
 DisableInCoop=1
+WorldSpaceYaw=1
 
 [Hotkeys]
 ; Virtual-key codes. Defaults: End (toggle), Page Up (cycle tracking mode).
 Toggle=0x23
 CycleMode=0x21
+YawMode=0x22
 ; Ctrl+Shift+Y (toggle) and Ctrl+Shift+G (cycle tracking mode) fire the same
 ; actions on a keyboard with no navigation cluster. They are always registered.
 ```
@@ -279,13 +289,14 @@ every 600 frames carrying the pose being handed to the game.
 
 ### Known limitations
 
-- **The camera adapter checks the game build before starting.** An unrecognised
-  build leaves tracking disabled and records `unsupported camera module` in the
-  log. The adapter has been tested with the installed Ubisoft Connect build.
+- **The mod checks the game build before starting.** It knows one Steam build and
+  one Ubisoft Connect build. On any other build it leaves the game alone, and the
+  log records the build's fingerprint and whether it is newer or older than the
+  builds the mod knows.
 - **Lean is limited by nearby geometry.** The mod uses the game's collision query
   to keep the eye back from an obstruction.
 - **The mod replaces a file the game ships.** A game update, or verifying the files
-  in Ubisoft Connect, restores the original. Run the installer again.
+  in Steam or Ubisoft Connect, restores the original. Run the installer again.
 - **A real Tobii eye tracker will not work while the mod is installed**, because the
   mod takes the place of the library that talks to it.
 
@@ -343,4 +354,5 @@ MIT License - see [LICENSE](LICENSE) for details.
 This is an unofficial mod. It is not affiliated with, endorsed by, or supported by
 Ubisoft, and it is not affiliated with or endorsed by Tobii. Use it at your own
 risk. It replaces a file inside your game folder and keeps the original beside it;
-a game update or a file verification in Ubisoft Connect puts the original back.
+a game update or a file verification in Steam or Ubisoft Connect puts the original
+back.

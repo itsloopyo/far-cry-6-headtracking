@@ -45,8 +45,9 @@ inline const char* FarCry6AdsModeDescription(AdsMode mode) {
 // paused   yaw, pitch and the lean fade onto the sights and stay there; roll stays
 //          live, since a head tilt moves neither the eye off the barrel nor the
 //          aim point off the middle of the frame.
-// tracked  the same swing onto the sights, then head tracking carries on measured
-//          from the pose the sights came up on.
+// tracked  the same swing onto the sights, then head tracking carries on: yaw and
+//          pitch measured from the pose the sights came up on, the lean and roll
+//          left absolute so the player's own position carries into the aim.
 //
 // Units are the Tobii transformation's: degrees and millimetres. Blending is
 // linear in both, so nothing is converted.
@@ -66,7 +67,16 @@ public:
         // captured is held; capturing one on the way down would step the view the
         // other way.
         const bool holdEntry = aiming || (scale < 1.0f && m_entry.HasEntry());
-        const Pose rel = m_entry.Relative(holdEntry, live, abs);
+        Pose rel = m_entry.Relative(holdEntry, live, abs);
+        // The lean stays absolute in the tracked mode, where the shared contract makes
+        // it relative to the entry frame like yaw and pitch. Relative is right for the
+        // aim axes: zeroing them is what swings the view onto the point the reticle was
+        // marking. The lean marks nothing - it is where the player's head physically is
+        // - and zeroing it means leaning all the way in and all the way out give the
+        // same sight picture, which is not what the player is doing with their body.
+        rel.x = abs.x;
+        rel.y = abs.y;
+        rel.z = abs.z;
         return ToTransformation(cameraunlock::ads::BlendAdsPose(mode, scale, abs, rel));
     }
 
