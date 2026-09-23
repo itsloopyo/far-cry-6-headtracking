@@ -25,7 +25,7 @@ add_subdirectory(cameraunlock-core/cpp ${CMAKE_BINARY_DIR}/cameraunlock-core)
 add_library(FarCry6HeadTracking SHARED
     src/camera_adapter.cpp
     src/headlight.cpp
-    src/orientation_dot.cpp
+    src/reticle.cpp
     src/build_profile.cpp
     src/ubisoft_offsets.cpp
     src/steam_offsets.cpp

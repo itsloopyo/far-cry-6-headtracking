@@ -67,7 +67,7 @@ void FramePump::Advance() {
             m_transformation = ToTransformation(sample);
         } else {
             // Here, ahead of the game, so the native extended view, its HUD
-            // compensation, the render lean and the aim dot all see one pose.
+            // compensation, the render lean and the reticle all see one pose.
             m_transformation = ScaleForZoom(ToTransformation(sample), CameraZoomFactor());
             m_transformation = m_adsLean.Apply(m_aiming, m_transformation,
                                                static_cast<unsigned long long>(now / 1000));

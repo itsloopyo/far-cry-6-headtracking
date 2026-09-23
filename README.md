@@ -9,7 +9,6 @@ An unofficial head tracking mod for Far Cry 6 that moves the view with your head
 - **Decoupled look and aim** - your head moves the view, your mouse or controller keeps the aim
 - **Six-axis head tracking** - yaw, pitch, roll and positional lean
 - **Works with any OpenTrack compatible tracker** - free options available for PC, iOS and Android
-- **Aim dot** - a small dot marks where you are aiming whenever the game's own crosshair is not on screen
 
 ## Requirements
 

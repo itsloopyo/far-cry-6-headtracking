@@ -6,7 +6,7 @@
 #include "camera_pose.h"
 #include "frame_pump.h"
 #include "headlight.h"
-#include "orientation_dot.h"
+#include "reticle.h"
 #include "logging.h"
 #include "mod.h"
 
@@ -178,7 +178,7 @@ void PublishAiming(void* camera) {
     const auto* vtable = *reinterpret_cast<SightDeviceFn**>(owner);
     const bool sights = static_cast<uint8_t*>(owner)[0x2afa] != 0;
     const bool phone = vtable[0x230 / 8](owner);
-    const bool weapon = OrientationDotWeaponOut();
+    const bool weapon = ReticleWeaponOut();
     const bool aiming = sights && weapon;
     static thread_local int lastState = -1;
     const int state = (sights ? 1 : 0) | (phone ? 2 : 0) | (weapon ? 4 : 0);
@@ -288,7 +288,6 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
 
     RenderPose next;
     if (g_updateContext.head_active) {
-        NoteOrientationDotGameplay();
         PublishZoom(*camera);
         next.camera = camera;
         next.eye = camera->eye;
@@ -351,7 +350,7 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
                 const float y = -Vec3::Dot(leaned, rolled.up) / depth / tanV;
                 const float rotX = Vec3::Dot(straight, nativeRolled.right) / straightDepth / tanH;
                 const float rotY = -Vec3::Dot(straight, nativeRolled.up) / straightDepth / tanV;
-                NoteOrientationDotAim(x, y, x - rotX, y - rotY);
+                NoteReticleParallax(x - rotX, y - rotY);
 
                 static thread_local unsigned aimFrames = 0;
                 if (++aimFrames % 300 == 1) {
@@ -506,7 +505,7 @@ bool StartCameraAdapter() {
         return false;
     }
     Log::Line("Camera adapter active: native yaw/pitch, render roll and collision-clamped XYZ");
-    return StartOrientationDot(g_module, o) && StartHeadlight(g_module, o);
+    return StartReticle(g_module, o) && StartHeadlight(g_module, o);
 }
 
 }  // namespace FarCry6HeadTracking

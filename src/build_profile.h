@@ -40,9 +40,7 @@ struct Offsets {
     // sight-device slot, checked so the aim state the mod reads is the one it uses.
     NativeFunction sights_read;
     NativeFunction binoculars_call;
-    NativeFunction reticle_visibility;
     NativeFunction reticle_position;
-    NativeFunction reticle_destroy;
     NativeFunction reticle_publish_position;
     // Vtable slots 0xf8 (spawn its light) and 0 (scalar deleting destructor) of the
     // flashlight component. Both are jump thunks into the packed code.

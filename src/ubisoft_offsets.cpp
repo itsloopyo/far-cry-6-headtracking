@@ -20,9 +20,7 @@ constexpr Offsets kOffsets_20250514 = {
     {0x2b9ee0, 0x66cd8ae6},   // body_collider
     {0x12d9714, 0xd157382e},  // sights_read
     {0x12d9754, 0x4eaa089f},  // binoculars_call
-    {0x30bb060, 0x8812c97c},  // reticle_visibility
     {0x27ee100, 0x9196e66a},  // reticle_position
-    {0x3089e50, 0x0683cfc9},  // reticle_destroy
     {0x2777930, 0xcb643b5c},  // reticle_publish_position
     {0x14b9c10, 0x95cb8be8},  // flashlight_spawn
     {0x14a7150, 0xbed0683d},  // flashlight_destroy

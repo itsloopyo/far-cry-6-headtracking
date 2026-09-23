@@ -14,8 +14,7 @@ repository alone.
 - **License:** `MIT`
 - **Upstream:** https://github.com/itsloopyo/cameraunlock-core
 - **Usage:** Provides the OpenTrack receiver, the pose interpolation and smoothing
-  pipeline, the INI reader, the hotkey poller, the file log and the Direct3D 12
-  overlay renderer that draws the aim dot. Its install and
+  pipeline, the INI reader, the hotkey poller and the file log. Its install and
   uninstall script bodies, its game-path detection scripts and its `games.json`
   are what `install.cmd` and `uninstall.cmd` run.
 - **Bundled:** yes, in two forms. The library is compiled into the shipped DLL,
@@ -36,7 +35,7 @@ Copyright (c) itsloopyo.
   DLL can be diffed against upstream.
 - **License:** `BSD-2-Clause`
 - **Upstream:** https://github.com/TsudaKageyu/minhook
-- **Usage:** Hooks the camera, reticle, flashlight and graphics interfaces, and
+- **Usage:** Hooks the camera, reticle and flashlight interfaces, and
   watches two Ubisoft Connect entry points so head tracking can hold still in a
   co-op session.
 - **Bundled:** yes. Vendored inside cameraunlock-core and compiled into the shipped
@@ -203,10 +202,10 @@ affiliated with or endorsed by Tobii.
   (PE timestamp `6824d119`, image size `1fb64000`, checksum `1ee4dd4b`) and of the
   Steam build (PE timestamp `644bbd74`, image size `1fe87000`, checksum `1f12fe67`).
 - **Usage:** its camera parameter layout, rotation conventions, HUD quaternion
-  location, gaze-aim flags, collision query interface, reticle visibility and screen
-  position, flashlight component and entity transform setter establish the boundary
-  used by `src/camera_adapter.cpp`, `src/camera_pose.h`, `src/orientation_dot.cpp`
-  and `src/headlight.cpp`.
+  location, gaze-aim flags, collision query interface, reticle screen position,
+  flashlight component and entity transform setter establish the boundary used by
+  `src/camera_adapter.cpp`, `src/camera_pose.h`, `src/reticle.cpp` and
+  `src/headlight.cpp`.
 - **Bundled:** no game code, headers or binaries. The adapter and its declarations
   are this project's own MIT-licensed implementation.
 
