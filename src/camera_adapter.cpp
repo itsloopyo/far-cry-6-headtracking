@@ -11,6 +11,7 @@
 #include "mod.h"
 
 #include "cameraunlock/camera/lean_clamp.h"
+#include "cameraunlock/camera/zoom_compensation.h"
 #include "cameraunlock/hooks/hook_manager.h"
 #include "cameraunlock/math/quat4.h"
 
@@ -19,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <mutex>
 
@@ -82,6 +84,8 @@ size_t g_nextPose = 0;
 std::atomic<bool> g_aiming{false};
 std::atomic<unsigned long long> g_aimingStamp{0};
 constexpr unsigned long long kAimingFreshMs = 200;
+std::atomic<float> g_zoomFactor{1.0f};
+std::atomic<unsigned long long> g_zoomStamp{0};
 
 template <typename Fn>
 Fn Native(const NativeFunction& function) {
@@ -160,9 +164,9 @@ float AimDistance(const QueryContext& query, const Vec3& start, const Vec3& dire
 // the phone - Far Cry 6 has no binoculars. That aim state is what the update pauses
 // the extended view on when the profile's ExtendedViewInIronsight is off.
 //
-// The mod's own definition is narrower. The sights byte is set by the aim button even
-// with nothing in hand, which has no sights to settle onto, and the phone is a screen
-// the player reads rather than a sight to settle onto, so neither pauses the view.
+// The mod's own definition is narrower, because all it drives is easing the lean out.
+// The sights byte is set by the aim button even with nothing in hand, which has no
+// sight line to keep the eye on, and the phone is a screen the player reads.
 void PublishAiming(void* camera) {
     // The update itself skips a camera whose +0x1a is clear before it asks for the
     // owner. A camera with no owner has no aim state, and must not overwrite the one
@@ -200,8 +204,8 @@ void HookedUpdate(void* camera, float dt, unsigned flags) {
         extendedView[0x62] = 0;
         extendedView[0x64] = 0;
         // +0x61 is ExtendedViewInIronsight. Off, this update pauses the extended view
-        // while aiming, which would leave the tracked ADS mode nothing to track. The
-        // ADS mode owns that decision, so the update always sees it on.
+        // while aiming, and head tracking has to carry on through the aim, so the
+        // update always sees it on.
         inIronsight = extendedView[0x61];
         extendedView[0x61] = 1;
     }
@@ -244,6 +248,40 @@ void HookedRotation(void* extendedView, const Quat4* reference, Quat4* result) {
     *hudRotation = *hudRotation * Quat4(0.0f, std::sin(halfRoll), 0.0f, std::cos(halfRoll));
 }
 
+// settings+0x0c is the live horizontal field of view and +0x1c the game's un-zoomed
+// one. Iron sights narrow +0x0c from 1.3090 to 1.1345 while +0x1c holds 1.3090, and
+// the two agree at the hip. The native extended view applies the same yaw either
+// way, so without this a head turn moves the picture further through the sights.
+void PublishZoom(const CameraParameters& camera) {
+    float fov;
+    float base;
+    std::memcpy(&fov, camera.settings + 0x0c, sizeof(fov));
+    std::memcpy(&base, camera.settings + 0x1c, sizeof(base));
+    constexpr float kPi = 3.14159265f;
+    const bool valid = std::isfinite(fov) && std::isfinite(base) && fov > 0.0f && fov < kPi &&
+                       base > 0.0f && base < kPi;
+    static thread_local bool logged = false;
+    static thread_local bool loggedInvalid = false;
+    if (!valid) {
+        if (!loggedInvalid) {
+            loggedInvalid = true;
+            Log::Line("ERROR: field of view unreadable (live %g, base %g); head tracking is "
+                      "not scaled to the zoom", fov, base);
+        }
+        return;
+    }
+    const float factor = cameraunlock::camera::FovZoomFactor(std::tan(fov * 0.5f),
+                                                             std::tan(base * 0.5f));
+    if (!logged) {
+        logged = true;
+        Log::Line("Zoom: live fov %.4f rad, base fov %.4f rad, both horizontal, frame aspect "
+                  "%.4f, factor %.4f", fov, base, g_frameAspect.load(std::memory_order_relaxed),
+                  factor);
+    }
+    g_zoomFactor.store(factor, std::memory_order_relaxed);
+    g_zoomStamp.store(GetTickCount64(), std::memory_order_relaxed);
+}
+
 void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
     g_setAngles(camera, angles);
     if (!g_updateContext.camera) return;
@@ -251,6 +289,7 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
     RenderPose next;
     if (g_updateContext.head_active) {
         NoteOrientationDotGameplay();
+        PublishZoom(*camera);
         next.camera = camera;
         next.eye = camera->eye;
         next.forward = camera->forward;
@@ -394,6 +433,14 @@ void HookedRender(const CameraParameters* camera, void* output, const float* vie
 }
 
 }  // namespace
+
+float CameraZoomFactor() {
+    // Stale outside gameplay, where no pose reaches the camera anyway.
+    if (GetTickCount64() - g_zoomStamp.load(std::memory_order_relaxed) > kAimingFreshMs) {
+        return 1.0f;
+    }
+    return g_zoomFactor.load(std::memory_order_relaxed);
+}
 
 bool CameraAiming() {
     // A camera update that has stopped arriving (menu, cinematic, loading) reads as

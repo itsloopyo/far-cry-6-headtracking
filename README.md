@@ -156,6 +156,14 @@ the mouse or controller, then turning your head. The selection is saved as
 `[Gameplay] WorldSpaceYaw` (`1` for world, `0` for local). Rebind the key with
 `[Hotkeys] YawMode` (default `0x22`).
 
+### Aiming down sights
+
+Head tracking stays on while you aim. The weapon stays where your mouse or
+controller points it, so with your head turned it sits off to one side with its
+sights still lined up, and your rounds land where those sights point. Head
+movement is scaled to the zoom, so a scope does not magnify it. Leaning eases out
+while the sights are up, because it would move your eye off them.
+
 ## Configuration
 
 `FarCry6HeadTracking.ini` is written next to the mod DLL in `<Far Cry 6>\bin` the
@@ -279,6 +287,11 @@ every 600 frames carrying the pose being handed to the game.
 - The log records `Multiplayer session published: N of 2 players` whenever that
   changes. Far Cry 6 publishes a joinable session in single player too, so `1 of 2`
   is normal and leaves head tracking running.
+
+**The weapon is off to one side when I aim down sights**
+
+- Your head is turned: the weapon stays on your aim and you are looking past it.
+  Turn back to it, or move your aim to where you are looking.
 
 **The game window moved when I launched**
 

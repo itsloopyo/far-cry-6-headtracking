@@ -665,100 +665,72 @@ tobii::Transformation HeadPose(float yaw, float pitch, float roll, float x, floa
     return t;
 }
 
-// Far Cry 6 has two ADS slots. `marker` is another mod's slot, so a file carrying it
-// lands on the default rather than on a mode this game does not have.
-void TestAdsModeSetting() {
-    Check(kDefaultAdsMode == AdsMode::Paused, "ADS mode defaults to paused");
-    Check(ParseFarCry6AdsMode("tracked") == AdsMode::Tracked, "tracked parses");
-    Check(ParseFarCry6AdsMode(" Tracked ") == AdsMode::Tracked,
-          "tracked parses whatever its case and surrounding spaces");
-    Check(ParseFarCry6AdsMode("paused") == AdsMode::Paused, "paused parses");
-    Check(ParseFarCry6AdsMode("marker") == AdsMode::Paused, "marker is not a mode here");
-    Check(ParseFarCry6AdsMode("") == AdsMode::Paused, "an empty AdsMode is the default");
-    Check(ParseFarCry6AdsMode("free") == AdsMode::Paused, "an unknown AdsMode is the default");
-    Check(NextFarCry6AdsMode(AdsMode::Paused) == AdsMode::Tracked &&
-              NextFarCry6AdsMode(AdsMode::Tracked) == AdsMode::Paused,
-          "the ADS cycle is paused, tracked, paused");
-}
-
-// paused: yaw, pitch and the lean settle onto the sights; a head tilt keeps rolling
-// the view throughout.
-void TestAdsPausedKeepsRoll() {
+// Hip fire passes the pose through; with the sights up the lean eases out while
+// rotation, roll included, stays absolute and unscaled.
+void TestAdsLeanEasing() {
     using cameraunlock::ads::AdsFade;
-    AdsPose ads;
+    AdsLean ads;
     const tobii::Transformation head = HeadPose(20.0f, -10.0f, 15.0f, 30.0f, -20.0f, 40.0f);
 
-    const tobii::Transformation hip = ads.Apply(AdsMode::Paused, false, true, head, 1000);
-    CheckNear(hip.rotation.yaw_degrees, 20.0f, "at the hip the pose passes through");
-    CheckNear(hip.position.z, 40.0f, "at the hip the lean passes through");
+    const tobii::Transformation hip = ads.Apply(false, head, 1000);
+    CheckNear(hip.rotation.yaw_degrees, 20.0f, "at the hip yaw passes through");
+    CheckNear(hip.rotation.pitch_degrees, -10.0f, "at the hip pitch passes through");
+    CheckNear(hip.rotation.roll_degrees, 15.0f, "at the hip roll passes through");
+    CheckNear(hip.position.x, 30.0f, "at the hip the lean passes through (x)");
+    CheckNear(hip.position.y, -20.0f, "at the hip the lean passes through (y)");
+    CheckNear(hip.position.z, 40.0f, "at the hip the lean passes through (z)");
 
-    const tobii::Transformation start = ads.Apply(AdsMode::Paused, true, true, head, 1001);
-    CheckNear(start.rotation.roll_degrees, 15.0f, "roll is untouched as the sights come up");
-
+    ads.Apply(true, head, 1001);
     const unsigned long long up = 1001 + AdsFade::kLowerMs + 1;
-    const tobii::Transformation aimed = ads.Apply(AdsMode::Paused, true, true, head, up);
-    CheckNear(aimed.rotation.yaw_degrees, 0.0f, "paused settles yaw onto the sights");
-    CheckNear(aimed.rotation.pitch_degrees, 0.0f, "paused settles pitch onto the sights");
-    CheckNear(aimed.position.x, 0.0f, "paused settles the lean onto the sights (x)");
-    CheckNear(aimed.position.y, 0.0f, "paused settles the lean onto the sights (y)");
-    CheckNear(aimed.position.z, 0.0f, "paused settles the lean onto the sights (z)");
-    CheckNear(aimed.rotation.roll_degrees, 15.0f, "paused keeps roll live");
+    const tobii::Transformation aimed = ads.Apply(true, head, up);
+    CheckNear(aimed.rotation.yaw_degrees, 20.0f, "with the sights up yaw is untouched");
+    CheckNear(aimed.rotation.pitch_degrees, -10.0f, "with the sights up pitch is untouched");
+    CheckNear(aimed.rotation.roll_degrees, 15.0f, "with the sights up roll is untouched");
+    CheckNear(aimed.position.x, 0.0f, "with the sights up the lean is out (x)");
+    CheckNear(aimed.position.y, 0.0f, "with the sights up the lean is out (y)");
+    CheckNear(aimed.position.z, 0.0f, "with the sights up the lean is out (z)");
 
-    const tobii::Transformation tilted =
-        ads.Apply(AdsMode::Paused, true, true, HeadPose(40.0f, 5.0f, -8.0f, 0, 0, 0), up + 16);
-    CheckNear(tilted.rotation.yaw_degrees, 0.0f, "head movement does not move paused aim");
-    CheckNear(tilted.rotation.roll_degrees, -8.0f, "a new head tilt still rolls a paused aim");
+    AdsLean mid;
+    mid.Apply(false, head, 0);
+    mid.Apply(true, head, 1);
+    const tobii::Transformation half = mid.Apply(true, head, 1 + AdsFade::kLowerMs / 2);
+    Check(half.position.z > 0.0f && half.position.z < 40.0f,
+          "mid-transition the lean is part way out");
+    CheckNear(half.position.x / 30.0f, half.position.z / 40.0f,
+              "mid-transition every lean axis is scaled by the same fade");
+    CheckNear(half.rotation.yaw_degrees, 20.0f, "mid-transition yaw is untouched");
+    CheckNear(half.rotation.roll_degrees, 15.0f, "mid-transition roll is untouched");
 
-    ads.Apply(AdsMode::Paused, false, true, head, up + 32);
+    // Lowering the sights halfway down continues from where the lean is.
+    const tobii::Transformation reversed =
+        mid.Apply(false, head, 2 + AdsFade::kLowerMs / 2);
+    Check(std::fabs(reversed.position.z - half.position.z) < 2.0f,
+          "a reversal mid-transition does not step the lean");
     const tobii::Transformation back =
-        ads.Apply(AdsMode::Paused, false, true, head, up + 32 + AdsFade::kRaiseMs + 1);
-    CheckNear(back.rotation.yaw_degrees, 20.0f, "lowering the sights returns to the head pose");
+        mid.Apply(false, head, 2 + AdsFade::kLowerMs / 2 + AdsFade::kRaiseMs + 1);
     CheckNear(back.position.z, 40.0f, "lowering the sights returns the lean");
 }
 
-// tracked: the same settle onto the sights, then tracking measured from the pose the
-// sights came up on for the aim axes, with roll and the lean absolute, and no step
-// when the sights come back down.
-void TestAdsTrackedFromEntry() {
-    using cameraunlock::ads::AdsFade;
-    AdsPose ads;
-    const tobii::Transformation entry = HeadPose(20.0f, -10.0f, 15.0f, 30.0f, -20.0f, 40.0f);
-    ads.Apply(AdsMode::Tracked, false, true, entry, 0);
-    ads.Apply(AdsMode::Tracked, true, true, entry, 1);
+// The zoom factor shrinks what moves the picture across the frame and leaves roll.
+void TestZoomScaling() {
+    const tobii::Transformation head = HeadPose(20.0f, -10.0f, 15.0f, 30.0f, -20.0f, 40.0f);
 
-    const unsigned long long up = 1 + AdsFade::kLowerMs + 1;
-    const tobii::Transformation moved = HeadPose(30.0f, -4.0f, 5.0f, 35.0f, -20.0f, 50.0f);
-    const tobii::Transformation aimed = ads.Apply(AdsMode::Tracked, true, true, moved, up);
-    CheckNear(aimed.rotation.yaw_degrees, 10.0f, "tracked yaw is measured from entry");
-    CheckNear(aimed.rotation.pitch_degrees, 6.0f, "tracked pitch is measured from entry");
-    CheckNear(aimed.rotation.roll_degrees, 5.0f, "tracked roll stays absolute");
-    // The lean is where the player's head physically is, so it carries into the aim
-    // rather than being measured from the frame the sights came up on.
-    CheckNear(aimed.position.x, 35.0f, "tracked lean stays absolute (x)");
-    CheckNear(aimed.position.z, 50.0f, "tracked lean stays absolute (z)");
+    const tobii::Transformation hip = ScaleForZoom(head, 1.0f);
+    CheckNear(hip.rotation.yaw_degrees, 20.0f, "factor 1 leaves yaw alone");
+    CheckNear(hip.rotation.pitch_degrees, -10.0f, "factor 1 leaves pitch alone");
+    CheckNear(hip.position.z, 40.0f, "factor 1 leaves the lean alone");
 
-    const tobii::Transformation released =
-        ads.Apply(AdsMode::Tracked, false, true, moved, up + 1);
-    Check(std::fabs(released.rotation.yaw_degrees - aimed.rotation.yaw_degrees) < 0.5f,
-          "lowering the sights in tracked does not step the view");
-    const tobii::Transformation back =
-        ads.Apply(AdsMode::Tracked, false, true, moved, up + 1 + AdsFade::kRaiseMs + 1);
-    CheckNear(back.rotation.yaw_degrees, 30.0f, "tracked returns to the head pose after lowering");
-
-    AdsPose seam;
-    seam.Apply(AdsMode::Tracked, true, true, HeadPose(175.0f, 0, 0, 0, 0, 0), 0);
-    const tobii::Transformation across = seam.Apply(
-        AdsMode::Tracked, true, true, HeadPose(-175.0f, 0, 0, 0, 0, 0), AdsFade::kLowerMs + 1);
-    CheckNear(across.rotation.yaw_degrees, 10.0f, "tracked yaw crosses the seam the short way");
-
-    AdsPose suppressed;
-    suppressed.Apply(AdsMode::Tracked, true, true, entry, 0);
-    suppressed.Reset();
-    suppressed.Apply(AdsMode::Tracked, true, true, moved, 1);
-    const tobii::Transformation fresh =
-        suppressed.Apply(AdsMode::Tracked, true, true, moved, 2 + AdsFade::kLowerMs);
-    CheckNear(fresh.rotation.yaw_degrees, 0.0f,
-              "after a suppression the next aim measures from its own entry");
+    const float factor = 0.5f;
+    const tobii::Transformation zoomed = ScaleForZoom(head, factor);
+    const float kDeg = 3.14159265f / 180.0f;
+    CheckNear(std::tan(zoomed.rotation.yaw_degrees * kDeg), std::tan(20.0f * kDeg) * factor,
+              "yaw scales so its screen displacement matches the un-zoomed view");
+    CheckNear(std::tan(zoomed.rotation.pitch_degrees * kDeg), std::tan(-10.0f * kDeg) * factor,
+              "pitch scales so its screen displacement matches the un-zoomed view");
+    CheckNear(zoomed.rotation.roll_degrees, 15.0f, "roll does not scale with the zoom");
+    CheckNear(zoomed.position.x, 15.0f, "the lean scales with the zoom (x)");
+    CheckNear(zoomed.position.y, -10.0f, "the lean scales with the zoom (y)");
+    CheckNear(zoomed.position.z, 20.0f, "the lean scales with the zoom (z)");
 }
 
 int main() {
@@ -777,9 +749,8 @@ int main() {
     TestUdpPortRecovery();
     TestNonFiniteRotationIsDropped();
     TestWindowCentring();
-    TestAdsModeSetting();
-    TestAdsPausedKeepsRoll();
-    TestAdsTrackedFromEntry();
+    TestAdsLeanEasing();
+    TestZoomScaling();
 
     if (g_failures == 0) {
         std::printf("all tests passed\n");

@@ -47,10 +47,10 @@ private:
     FramePump();
 
     void LogHeartbeat() const;
-    void LogAdsEdge(bool aiming, AdsMode mode);
+    void LogAdsEdge(bool aiming);
 
     tobii::Transformation m_transformation{};
-    AdsPose m_ads;
+    AdsLean m_adsLean;
     bool m_aiming = false;
     bool m_loggedAiming = false;
     int64_t m_timestampMicroseconds = 0;

@@ -74,11 +74,9 @@ bool Mod::LoadConfiguration() {
         return false;
     }
     m_iniPath = iniPath;
-    m_adsMode.store(m_cfg.ads_mode, std::memory_order_relaxed);
     m_worldSpaceYaw.store(m_cfg.world_space_yaw, std::memory_order_relaxed);
     Log::Line("Yaw mode: %s", m_cfg.world_space_yaw ? "world" : "camera-local");
     Log::Line("Config loaded from %s", iniPath.c_str());
-    Log::Line("%s", FarCry6AdsModeDescription(m_cfg.ads_mode));
     Log::Line("Port %u, enable on startup %s, position %s, disable in co-op %s",
               m_cfg.udp_port,
               m_cfg.enabled_on_startup ? "yes" : "no",
@@ -190,20 +188,6 @@ void Mod::SetInCoopSession(bool in_coop) {
     Log::Line("Head tracking %s: the session now has %s",
               in_coop ? "held still" : "live",
               in_coop ? "another player in it" : "one player in it");
-}
-
-void Mod::CycleAdsMode() {
-    const AdsMode next = NextFarCry6AdsMode(m_adsMode.load(std::memory_order_relaxed));
-    m_adsMode.store(next, std::memory_order_relaxed);
-    // One key of the existing file, keeping every other setting and comment. The
-    // INI writer truncates, so it cannot be used here.
-    if (!WritePrivateProfileStringA("Gameplay", "AdsMode", AdsModeValue(next),
-                                    m_iniPath.c_str())) {
-        Log::Line("WARN: could not save AdsMode to %s (error %lu); the mode applies for "
-                  "this session but will not survive a restart", m_iniPath.c_str(),
-                  GetLastError());
-    }
-    Log::Line("%s", FarCry6AdsModeDescription(next));
 }
 
 bool Mod::TrackingAllowed() const {

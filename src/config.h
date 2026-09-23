@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include "ads.h"
-
 #include "cameraunlock/data/position_settings.h"
 #include "cameraunlock/math/smoothing_utils.h"
 
@@ -75,12 +73,10 @@ struct Config {
     bool invert_pos_z = kDefaultInvert;
 
     bool disable_in_coop = kDefaultDisableInCoop;
-    AdsMode ads_mode = kDefaultAdsMode;
     bool world_space_yaw = kDefaultWorldSpaceYaw;
 
     int vk_toggle = kDefaultVkToggle;
     int vk_cycle_mode = kDefaultVkCycleMode;
-    int vk_ads_mode = kDefaultVkAdsMode;
     int vk_yaw_mode = kDefaultVkYawMode;
 
     bool LoadOrCreate(const char* iniPath);

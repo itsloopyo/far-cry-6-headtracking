@@ -56,40 +56,41 @@ void FramePump::Advance() {
 
     const int64_t now = NowMicroseconds();
     if (!mod.TrackingAllowed()) {
-        m_ads.Reset();
+        m_adsLean.Reset();
         m_aiming = false;
         m_transformation = tobii::Transformation{};
     } else {
         const FrameSample sample = mod.Runtime().SampleFrame();
         m_aiming = CameraAiming();
         if (!mod.Runtime().IsEnabled()) {
-            m_ads.Reset();
+            m_adsLean.Reset();
             m_transformation = ToTransformation(sample);
         } else {
-            m_transformation = m_ads.Apply(mod.GetAdsMode(), m_aiming, sample.has_rotation,
-                                           ToTransformation(sample),
-                                           static_cast<unsigned long long>(now / 1000));
+            // Here, ahead of the game, so the native extended view, its HUD
+            // compensation, the render lean and the aim dot all see one pose.
+            m_transformation = ScaleForZoom(ToTransformation(sample), CameraZoomFactor());
+            m_transformation = m_adsLean.Apply(m_aiming, m_transformation,
+                                               static_cast<unsigned long long>(now / 1000));
         }
     }
-    LogAdsEdge(m_aiming, mod.GetAdsMode());
+    LogAdsEdge(m_aiming);
     m_timestampMicroseconds = now;
 
     LogHeartbeat();
 }
 
-// One line each way, so what the view did when the sights came up is in the log
-// with the mode that did it.
-void FramePump::LogAdsEdge(bool aiming, AdsMode mode) {
+// One line each way, with the zoom factor the sights brought with them.
+void FramePump::LogAdsEdge(bool aiming) {
     if (aiming == m_loggedAiming) return;
     m_loggedAiming = aiming;
-    Log::Line("ADS: sights %s (%s)", aiming ? "up" : "down", AdsModeValue(mode));
+    Log::Line("ADS: sights %s, zoom factor %.4f", aiming ? "up" : "down", CameraZoomFactor());
 }
 
 void FramePump::LogHeartbeat() const {
     if (m_updates % kHeartbeatFrames != 0) return;
     Mod& mod = Mod::Instance();
     Log::Line("update=%llu transform=%llu listening=%d receiving=%d enabled=%d paused=%d "
-              "coop=%d/%d ads=%d/%s yaw=%.2f pitch=%.2f roll=%.2f x=%.1f y=%.1f z=%.1f",
+              "coop=%d/%d ads=%d zoom=%.4f yaw=%.2f pitch=%.2f roll=%.2f x=%.1f y=%.1f z=%.1f",
               static_cast<unsigned long long>(m_updates),
               static_cast<unsigned long long>(m_transformationReads),
               mod.Runtime().IsListening() ? 1 : 0,
@@ -99,7 +100,7 @@ void FramePump::LogHeartbeat() const {
               mod.IsInCoopSession() ? 1 : 0,
               mod.IsCoopGateActive() ? 1 : 0,
               m_aiming ? 1 : 0,
-              AdsModeValue(mod.GetAdsMode()),
+              CameraZoomFactor(),
               m_transformation.rotation.yaw_degrees,
               m_transformation.rotation.pitch_degrees,
               m_transformation.rotation.roll_degrees,

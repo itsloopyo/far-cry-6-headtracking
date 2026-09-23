@@ -6,6 +6,7 @@
 #include "tobii_abi.h"
 #include "tracking_runtime.h"
 
+#include "cameraunlock/camera/zoom_compensation.h"
 #include "cameraunlock/math/angle_utils.h"
 
 namespace FarCry6HeadTracking {
@@ -27,6 +28,19 @@ inline tobii::Transformation ToTransformation(const FrameSample& sample) {
         t.position.z = sample.pos_z * kMillimetresPerMetre;
     }
     return t;
+}
+
+// Yaw, pitch and the lean move the picture across the frame, so a narrower field of
+// view magnifies them; roll turns it about the view axis by the same angle at any
+// field of view, so it is left alone.
+inline tobii::Transformation ScaleForZoom(tobii::Transformation pose, float factor) {
+    using cameraunlock::camera::ScaleAngleForZoom;
+    pose.rotation.yaw_degrees = ScaleAngleForZoom(pose.rotation.yaw_degrees, factor);
+    pose.rotation.pitch_degrees = ScaleAngleForZoom(pose.rotation.pitch_degrees, factor);
+    pose.position.x *= factor;
+    pose.position.y *= factor;
+    pose.position.z *= factor;
+    return pose;
 }
 
 inline tobii::ExtendedViewTransformation ToExtendedViewTransformation(

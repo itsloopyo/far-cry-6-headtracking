@@ -5,112 +5,35 @@
 
 #include "tobii_abi.h"
 
-#include "cameraunlock/ads/ads_blend.h"
 #include "cameraunlock/ads/ads_fade.h"
-#include "cameraunlock/ads/ads_mode.h"
-#include "cameraunlock/ads/entry_pose.h"
 
 namespace FarCry6HeadTracking {
 
-// Far Cry 6 ships the two-slot ADS cycle, paused and tracked. `marker` is not a
-// value here: ParseAdsMode is always called with allowMarker false, and the cycle
-// is the two-slot one.
-using cameraunlock::ads::AdsMode;
-using cameraunlock::ads::AdsModeValue;
-using cameraunlock::ads::kDefaultAdsMode;
-
-constexpr int kDefaultVkAdsMode = 0x2D;  // VK_INSERT
-
-inline AdsMode ParseFarCry6AdsMode(const char* text) {
-    return cameraunlock::ads::ParseAdsMode(text, false);
-}
-
-inline AdsMode NextFarCry6AdsMode(AdsMode mode) {
-    return cameraunlock::ads::NextAdsModeTwoSlot(mode);
-}
-
-// What the mode does, for the log. Core's toast wording does not fit this game:
-// roll stays live in paused.
-inline const char* FarCry6AdsModeDescription(AdsMode mode) {
-    return mode == AdsMode::Tracked
-               ? "ADS mode: tracked - the view settles onto the sights, then head tracking "
-                 "carries on from there"
-               : "ADS mode: paused - the view settles onto the sights and only a head tilt "
-                 "still rolls it";
-}
-
-// The head pose the game and the render hook are handed while the sights come up,
-// stay up and come down.
+// Head tracking carries straight on through the aim. The one thing the sights change
+// is the lean: the render hook moves the eye, and a leaned eye is no longer on the
+// sight line. The lean eases out while the sights are up and back in when they come
+// down. Rotation, roll included, is never touched.
 //
-// paused   yaw, pitch and the lean fade onto the sights and stay there; roll stays
-//          live, since a head tilt moves neither the eye off the barrel nor the
-//          aim point off the middle of the frame.
-// tracked  the same swing onto the sights, then head tracking carries on: yaw and
-//          pitch measured from the pose the sights came up on, the lean and roll
-//          left absolute so the player's own position carries into the aim.
-//
-// Units are the Tobii transformation's: degrees and millimetres. Blending is
-// linear in both, so nothing is converted.
-class AdsPose {
+// Units are the Tobii transformation's millimetres; scaling is linear, so nothing is
+// converted.
+class AdsLean {
 public:
-    // Once per frame. `live` says this frame's rotation is a real sample, which is
-    // what the entry pose may be captured from.
-    tobii::Transformation Apply(AdsMode mode, bool aiming, bool live,
-                                const tobii::Transformation& absolute,
+    // Once per frame, with the sights as the game reports them this frame.
+    tobii::Transformation Apply(bool aiming, const tobii::Transformation& pose,
                                 unsigned long long nowMs) {
-        using Pose = cameraunlock::ads::AdsEntryPose::Pose;
-        const Pose abs = ToPose(absolute);
         const float scale = m_fade.Update(aiming, nowMs);
-        // Kept for the length of the ride back down: dropping it when aiming ends
-        // would make the relative pose the absolute one, and the return would step
-        // the view by the whole entry offset in one frame. Only an entry that was
-        // captured is held; capturing one on the way down would step the view the
-        // other way.
-        const bool holdEntry = aiming || (scale < 1.0f && m_entry.HasEntry());
-        Pose rel = m_entry.Relative(holdEntry, live, abs);
-        // The lean stays absolute in the tracked mode, where the shared contract makes
-        // it relative to the entry frame like yaw and pitch. Relative is right for the
-        // aim axes: zeroing them is what swings the view onto the point the reticle was
-        // marking. The lean marks nothing - it is where the player's head physically is
-        // - and zeroing it means leaning all the way in and all the way out give the
-        // same sight picture, which is not what the player is doing with their body.
-        rel.x = abs.x;
-        rel.y = abs.y;
-        rel.z = abs.z;
-        return ToTransformation(cameraunlock::ads::BlendAdsPose(mode, scale, abs, rel));
+        tobii::Transformation out = pose;
+        out.position.x *= scale;
+        out.position.y *= scale;
+        out.position.z *= scale;
+        return out;
     }
 
     // Wherever tracking is suppressed, so the next aim starts clean.
-    void Reset() {
-        m_fade.Reset();
-        m_entry.Reset();
-    }
+    void Reset() { m_fade.Reset(); }
 
 private:
-    static cameraunlock::ads::AdsEntryPose::Pose ToPose(const tobii::Transformation& t) {
-        cameraunlock::ads::AdsEntryPose::Pose p;
-        p.yaw = t.rotation.yaw_degrees;
-        p.pitch = t.rotation.pitch_degrees;
-        p.roll = t.rotation.roll_degrees;
-        p.x = t.position.x;
-        p.y = t.position.y;
-        p.z = t.position.z;
-        return p;
-    }
-
-    static tobii::Transformation ToTransformation(const cameraunlock::ads::AdsEntryPose::Pose& p) {
-        tobii::Transformation t{};
-        t.rotation.yaw_degrees = p.yaw;
-        t.rotation.pitch_degrees = p.pitch;
-        t.rotation.roll_degrees = p.roll;
-        t.position.x = p.x;
-        t.position.y = p.y;
-        t.position.z = p.z;
-        return t;
-    }
-
     cameraunlock::ads::AdsFade m_fade;
-    cameraunlock::ads::AdsEntryPose m_entry;
 };
 
 }  // namespace FarCry6HeadTracking

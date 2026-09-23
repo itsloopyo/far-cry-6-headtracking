@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "ads.h"
 #include "config.h"
 #include "tracking_runtime.h"
 
@@ -48,12 +47,6 @@ public:
     // True when the head pose may reach the camera this frame.
     bool TrackingAllowed() const;
 
-    AdsMode GetAdsMode() const { return m_adsMode.load(std::memory_order_relaxed); }
-
-    // Advances the two-slot ADS cycle, saves it to the INI and logs the mode it
-    // landed on. Runs on the hotkey thread; the frame pump reads the mode afresh
-    // every frame, so a change mid-aim applies to that aim.
-    void CycleAdsMode();
     bool WorldSpaceYaw() const { return m_worldSpaceYaw.load(std::memory_order_relaxed); }
     void ToggleYawMode();
 
@@ -78,7 +71,6 @@ private:
     std::atomic<bool> m_paused{false};
     std::atomic<bool> m_inCoop{false};
     std::atomic<bool> m_coopGateActive{false};
-    std::atomic<AdsMode> m_adsMode{kDefaultAdsMode};
     std::atomic<bool> m_worldSpaceYaw{kDefaultWorldSpaceYaw};
     std::string m_iniPath;
     Config m_cfg{};

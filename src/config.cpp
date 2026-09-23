@@ -85,11 +85,6 @@ void WriteGameplaySection(cameraunlock::IniWriter& w) {
     w.WriteComment("Hold the view still while another player is in the session, so co-op runs");
     w.WriteComment("the stock camera. Set to 0 to keep head tracking in co-op.");
     w.WriteBool("DisableInCoop", kDefaultDisableInCoop);
-    w.WriteComment("What head tracking does with a weapon's sights up. paused: the view");
-    w.WriteComment("settles onto the sights and only a head tilt still rolls it. tracked: the");
-    w.WriteComment("view settles onto the sights, then head tracking carries on from there.");
-    w.WriteComment("The ADS mode key cycles this and saves it here.");
-    w.WriteString("AdsMode", AdsModeValue(kDefaultAdsMode));
     w.WriteComment("1: yaw about the game's reference up axis; 0: yaw about camera up.");
     w.WriteBool("WorldSpaceYaw", kDefaultWorldSpaceYaw);
 }
@@ -97,15 +92,13 @@ void WriteGameplaySection(cameraunlock::IniWriter& w) {
 void WriteHotkeysSection(cameraunlock::IniWriter& w) {
     w.WriteSection("Hotkeys");
     w.WriteComment("Virtual-key codes. Defaults: End (toggle), Page Up (cycle tracking mode),");
-    w.WriteComment("Page Down (world/local yaw), Insert (cycle ADS mode).");
+    w.WriteComment("Page Down (world/local yaw).");
     w.WriteHex("Toggle", kDefaultVkToggle);
     w.WriteHex("CycleMode", kDefaultVkCycleMode);
-    w.WriteHex("AdsMode", kDefaultVkAdsMode);
     w.WriteHex("YawMode", kDefaultVkYawMode);
     w.WriteComment("Ctrl+Shift+H also switches world/local yaw.");
-    w.WriteComment("Ctrl+Shift+Y (toggle), Ctrl+Shift+G (cycle tracking mode) and Ctrl+Shift+U");
-    w.WriteComment("(cycle ADS mode) fire the same actions on a keyboard with no navigation");
-    w.WriteComment("cluster. They are always registered.");
+    w.WriteComment("Ctrl+Shift+Y (toggle) and Ctrl+Shift+G (cycle tracking mode) fire the same");
+    w.WriteComment("actions on a keyboard with no navigation cluster. They are always registered.");
 }
 
 bool WriteDefaultIni(const char* path) {
@@ -211,13 +204,6 @@ void ReadPositionSection(Config& cfg, const cameraunlock::IniReader& ini) {
 void ReadGameplaySection(Config& cfg, const cameraunlock::IniReader& ini) {
     cfg.world_space_yaw = ini.ReadBool("Gameplay", "WorldSpaceYaw", kDefaultWorldSpaceYaw);
     cfg.disable_in_coop = ini.ReadBool("Gameplay", "DisableInCoop", kDefaultDisableInCoop);
-
-    const std::string ads = guards::ReadRawValue(ini, "Gameplay", "AdsMode");
-    cfg.ads_mode = ParseFarCry6AdsMode(ads.c_str());
-    if (!ads.empty() && _stricmp(ads.c_str(), AdsModeValue(cfg.ads_mode)) != 0) {
-        Log::Line("WARN: INI [Gameplay] AdsMode=%s is not paused or tracked; using %s",
-                  ads.c_str(), AdsModeValue(cfg.ads_mode));
-    }
 }
 
 // A rebind the poller cannot act on is the worst kind of config error: the key never
@@ -241,7 +227,6 @@ int ReadVirtualKey(const cameraunlock::IniReader& ini, const char* key, int fall
 void ReadHotkeysSection(Config& cfg, const cameraunlock::IniReader& ini) {
     cfg.vk_toggle     = ReadVirtualKey(ini, "Toggle",    kDefaultVkToggle);
     cfg.vk_cycle_mode = ReadVirtualKey(ini, "CycleMode", kDefaultVkCycleMode);
-    cfg.vk_ads_mode   = ReadVirtualKey(ini, "AdsMode",   kDefaultVkAdsMode);
     cfg.vk_yaw_mode   = ReadVirtualKey(ini, "YawMode",   kDefaultVkYawMode);
 }
 

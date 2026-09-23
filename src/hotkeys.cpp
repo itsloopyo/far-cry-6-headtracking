@@ -33,7 +33,6 @@ void StartHotkeys(const Config& cfg, TrackingRuntime& runtime) {
 
     auto onToggle = [&runtime]() { runtime.ToggleEnabled(); };
     auto onCycleMode = [&runtime]() { runtime.CycleTrackingMode(); };
-    auto onCycleAds = []() { Mod::Instance().CycleAdsMode(); };
     auto onYawMode = []() { Mod::Instance().ToggleYawMode(); };
 
     const bool cycleKeyBound = cfg.vk_cycle_mode != cfg.vk_toggle;
@@ -53,24 +52,12 @@ void StartHotkeys(const Config& cfg, TrackingRuntime& runtime) {
         g_poller.AddHotkey(cfg.vk_cycle_mode, NavGuarded(onCycleMode));
     }
 
-    const bool adsKeyBound =
-        cfg.vk_ads_mode != cfg.vk_toggle && cfg.vk_ads_mode != cfg.vk_cycle_mode;
-    if (!adsKeyBound) {
-        Log::Line("WARN: INI [Hotkeys] AdsMode 0x%02X is already bound to another action, "
-                  "so it is not bound to the ADS mode cycle; use Ctrl+Shift+U.",
-                  cfg.vk_ads_mode);
-    } else {
-        g_poller.AddHotkey(cfg.vk_ads_mode, NavGuarded(onCycleAds));
-    }
-
     // The chords are not an alternative the user picks between: both sets are live at
     // once, so a keyboard without a navigation cluster still reaches every action.
     g_poller.AddHotkey('Y', ChordGuarded(onToggle));
     g_poller.AddHotkey('G', ChordGuarded(onCycleMode));
-    g_poller.AddHotkey('U', ChordGuarded(onCycleAds));
     g_poller.AddHotkey('H', ChordGuarded(onYawMode));
-    if (cfg.vk_yaw_mode != cfg.vk_toggle && cfg.vk_yaw_mode != cfg.vk_cycle_mode &&
-        cfg.vk_yaw_mode != cfg.vk_ads_mode) {
+    if (cfg.vk_yaw_mode != cfg.vk_toggle && cfg.vk_yaw_mode != cfg.vk_cycle_mode) {
         g_poller.AddHotkey(cfg.vk_yaw_mode, NavGuarded(onYawMode));
         Log::Line("Yaw mode hotkey: 0x%02X (or Ctrl+Shift+H)", cfg.vk_yaw_mode);
     } else {
@@ -100,12 +87,8 @@ void StartHotkeys(const Config& cfg, TrackingRuntime& runtime) {
         std::snprintf(cycleKey, sizeof(cycleKey), "0x%02X (or Ctrl+Shift+G)",
                       cfg.vk_cycle_mode);
     }
-    char adsKey[32] = "Ctrl+Shift+U only";
-    if (adsKeyBound) {
-        std::snprintf(adsKey, sizeof(adsKey), "0x%02X (or Ctrl+Shift+U)", cfg.vk_ads_mode);
-    }
-    Log::Line("Hotkeys: toggle=0x%02X (or Ctrl+Shift+Y), cycle mode=%s, ADS mode=%s",
-              cfg.vk_toggle, cycleKey, adsKey);
+    Log::Line("Hotkeys: toggle=0x%02X (or Ctrl+Shift+Y), cycle mode=%s",
+              cfg.vk_toggle, cycleKey);
     g_started = true;
 }
 
