@@ -16,6 +16,7 @@
 - The tracking mode that Page Up or Ctrl+Shift+G selects is now saved and comes back at the next start, as the yaw mode already did.
 - An older version of the mod may not read the new layout correctly. It reads a key that moved as its own default, and it can misread a hotkey or another value that is now written as a name. To go back to an older version, first copy `FarCry6HeadTracking.ini.pre-canonical` back over `FarCry6HeadTracking.ini`, which restores the old file.
 - `uninstall.cmd` keeps `bin\FarCry6HeadTracking.ini` and its `.pre-canonical` copies, so your settings survive a reinstall.
+- When there is no `FarCry6HeadTracking.ini` and the mod cannot create one because the `bin` folder cannot be written, the mod now starts on its default settings and saves nothing that session. Earlier versions did not start at all in that case.
 - Since v0.1.0, `[Gameplay] AdsMode` and `[Hotkeys] AdsMode` are no longer read, and neither Insert nor Ctrl+Shift+U cycles an ADS mode: head tracking carries on through the sights in every case, and the lean eases out while they are up (faefd67).
 - Since v0.1.0, a `[Hotkeys] YawMode` on the same key as `[Hotkeys] AdsMode` switches the yaw mode; v0.1.0 left it unbound (faefd67).
 
