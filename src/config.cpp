@@ -4,9 +4,9 @@
 #include "config.h"
 
 #include "logging.h"
+#include "legacy_config/legacy_config.h"
 
 #include "cameraunlock/config/ini_reader.h"
-#include "cameraunlock/config/value_guards.h"
 
 #include <windows.h>
 
@@ -16,17 +16,6 @@
 namespace FarCry6HeadTracking {
 
 namespace {
-
-namespace guards = cameraunlock::config;
-
-// Every number the user can type reaches the camera through these. Core owns them
-// because each guards a hazard that is invisible without it: strtod parses a
-// PREFIX, so "0,15" written with a European decimal comma yields 0.15 -> 0.0, in
-// range, silently; GetPrivateProfileStringA does not strip an inline comment, so
-// "0.15 ; settle" reaches the parser with the comment attached; and "nan" and
-// "1e400" both parse. ReadFloatChecked requires the whole token and says so when
-// it will not.
-constexpr guards::LogSink kLogSink = &cameraunlock::logging::Line;
 
 bool FileExists(const char* path) {
     return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
@@ -122,114 +111,6 @@ bool WriteDefaultIni(const char* path) {
     return true;
 }
 
-// Sensitivity is bounded as well as finite-checked. A finite value can still
-// overflow the pose it multiplies, and the product reaching the transformation as
-// infinity leaves the view somewhere the player cannot recover from.
-float ReadSensitivity(const cameraunlock::IniReader& ini, const char* section,
-                      const char* key, float fallback) {
-    return guards::ReadFloatChecked(ini, section, key, fallback, -guards::kMaxSensitivity,
-                                    guards::kMaxSensitivity, kLogSink);
-}
-
-// A positional limit is a distance in metres, so it is finite and above zero.
-// Core bounds it to its own kMaxPositionLimit, which is generous rather than
-// tight: it exists to catch a mistyped 10000 for 0.10, not to police tuning.
-//
-// Zero is then refused rather than passed on. Core clamps a negative up to 0,
-// which is safe - it cannot invert PositionProcessor's clamp bounds the way a
-// negative does - but a limit of zero pins the axis shut, and a typo that silently
-// disables leaning is a worse answer than the shipped default. The follow-on line
-// is worded to continue core's clamp message rather than contradict it.
-float ReadLimit(const cameraunlock::IniReader& ini, const char* key, float fallback) {
-    const float value = guards::ReadFloatChecked(ini, "Position", key, fallback, 0.0f,
-                                                 guards::kMaxPositionLimit, kLogSink);
-    if (value > 0.0f) return value;
-    Log::Line("WARN: INI [Position] %s is not a usable distance, so the shipped "
-              "default %.2f is used instead", key, static_cast<double>(fallback));
-    return fallback;
-}
-
-// Validation, never a floor: any value in [0,1] reaches the processor untouched,
-// 0.0 included.
-float ReadSmoothing(const cameraunlock::IniReader& ini, const char* key, float fallback) {
-    return guards::ReadFloatChecked(ini, "Smoothing", key, fallback, 0.0f, 1.0f, kLogSink);
-}
-
-bool ReadGeneralSection(Config& cfg, const cameraunlock::IniReader& ini) {
-    cfg.enabled_on_startup = ini.ReadBool("General", "EnableOnStartup", kDefaultEnableOnStartup);
-    // ReadIntInRange rather than ReadInt: ReadInt answers 0 for a present but
-    // unparseable value rather than the default, so "Port=abc" would be reported
-    // to the user as a port of 0 that they never typed.
-    int port = kDefaultPort;
-    if (!ini.ReadIntInRange("General", "Port", port, kMinPort, kMaxPort, kDefaultPort)) {
-        // ReadIntInRange writes what it parsed before refusing, so the number the
-        // user has to go and correct is named. It reads 0 for a value that is not a
-        // number at all, which the range message covers.
-        Log::Line("ERROR: INI [General] Port=%d is not a whole number between %d and "
-                  "%d. The mod will not start.", port, kMinPort, kMaxPort);
-        return false;
-    }
-    cfg.udp_port = static_cast<uint16_t>(port);
-    return true;
-}
-
-void ReadSensitivitySection(Config& cfg, const cameraunlock::IniReader& ini) {
-    cfg.sens_yaw   = ReadSensitivity(ini, "Sensitivity", "Yaw",   kDefaultSensitivity);
-    cfg.sens_pitch = ReadSensitivity(ini, "Sensitivity", "Pitch", kDefaultSensitivity);
-    cfg.sens_roll  = ReadSensitivity(ini, "Sensitivity", "Roll",  kDefaultSensitivity);
-    cfg.invert_yaw   = ini.ReadBool("Sensitivity", "InvertYaw",   kDefaultInvert);
-    cfg.invert_pitch = ini.ReadBool("Sensitivity", "InvertPitch", kDefaultInvert);
-    cfg.invert_roll  = ini.ReadBool("Sensitivity", "InvertRoll",  kDefaultInvert);
-}
-
-void ReadSmoothingSection(Config& cfg, const cameraunlock::IniReader& ini) {
-    cfg.local_smoothing  = ReadSmoothing(ini, "LocalSmoothing",  kDefaultLocalSmoothing);
-    cfg.remote_smoothing = ReadSmoothing(ini, "RemoteSmoothing", kDefaultRemoteSmoothing);
-}
-
-void ReadPositionSection(Config& cfg, const cameraunlock::IniReader& ini) {
-    cfg.position_enabled = ini.ReadBool("Position", "Enabled", kDefaultPositionEnabled);
-    cfg.pos_sens_x = ReadSensitivity(ini, "Position", "SensitivityX", kDefaultPosSens);
-    cfg.pos_sens_y = ReadSensitivity(ini, "Position", "SensitivityY", kDefaultPosSens);
-    cfg.pos_sens_z = ReadSensitivity(ini, "Position", "SensitivityZ", kDefaultPosSens);
-    cfg.pos_limit_x = ReadLimit(ini, "LimitX", kDefaultPosLimitX);
-    cfg.pos_limit_y = ReadLimit(ini, "LimitY", kDefaultPosLimitY);
-    cfg.pos_limit_z = ReadLimit(ini, "LimitZ", kDefaultPosLimitZ);
-    cfg.pos_limit_z_back = ReadLimit(ini, "LimitZBack", kDefaultPosLimitZBack);
-    cfg.invert_pos_x = ini.ReadBool("Position", "InvertX", kDefaultInvert);
-    cfg.invert_pos_y = ini.ReadBool("Position", "InvertY", kDefaultInvert);
-    cfg.invert_pos_z = ini.ReadBool("Position", "InvertZ", kDefaultInvert);
-}
-
-void ReadGameplaySection(Config& cfg, const cameraunlock::IniReader& ini) {
-    cfg.world_space_yaw = ini.ReadBool("Gameplay", "WorldSpaceYaw", kDefaultWorldSpaceYaw);
-    cfg.disable_in_coop = ini.ReadBool("Gameplay", "DisableInCoop", kDefaultDisableInCoop);
-}
-
-// A rebind the poller cannot act on is the worst kind of config error: the key never
-// fires and the log says the binding was accepted. GetAsyncKeyState answers 0 for
-// anything outside [1, 254], so report the rejection and fall back to the default.
-//
-// IsBindableVirtualKey, not input::IsValidHotkeyCode. The two deliberately
-// disagree: this one asks "can this binding ever fire", which is the config
-// reader's question, while the other is an allow list of the keys the fleet's own
-// convention offers and would reject a perfectly pollable rebind like 0xC0.
-int ReadVirtualKey(const cameraunlock::IniReader& ini, const char* key, int fallback) {
-    const int raw = ini.ReadHex("Hotkeys", key, fallback);
-    if (guards::IsBindableVirtualKey(raw)) {
-        return raw;
-    }
-    Log::Line("WARN: INI [Hotkeys] %s value 0x%02X is not a usable virtual-key code; "
-              "using the default 0x%02X", key, raw, fallback);
-    return fallback;
-}
-
-void ReadHotkeysSection(Config& cfg, const cameraunlock::IniReader& ini) {
-    cfg.vk_toggle     = ReadVirtualKey(ini, "Toggle",    kDefaultVkToggle);
-    cfg.vk_cycle_mode = ReadVirtualKey(ini, "CycleMode", kDefaultVkCycleMode);
-    cfg.vk_yaw_mode   = ReadVirtualKey(ini, "YawMode",   kDefaultVkYawMode);
-}
-
 }  // namespace
 
 bool Config::LoadOrCreate(const char* iniPath) {
@@ -244,21 +125,39 @@ bool Config::LoadOrCreate(const char* iniPath) {
         return false;
     }
 
-    cameraunlock::IniReader ini;
-    if (!ini.Open(iniPath)) {
+    legacy::Config read;
+    const legacy::ReadStatus status = legacy::Read(iniPath, read);
+    if (status == legacy::ReadStatus::Absent) {
         Log::Line("ERROR: Failed to open INI: %s", iniPath);
         return false;
     }
-
-    if (!ReadGeneralSection(*this, ini)) {
-        return false;
-    }
-    ReadSensitivitySection(*this, ini);
-    ReadSmoothingSection(*this, ini);
-    ReadPositionSection(*this, ini);
-    ReadGameplaySection(*this, ini);
-    ReadHotkeysSection(*this, ini);
-    return true;
+    enabled_on_startup = read.enabled_on_startup;
+    udp_port = read.udp_port;
+    sens_yaw = read.sens_yaw;
+    sens_pitch = read.sens_pitch;
+    sens_roll = read.sens_roll;
+    invert_yaw = read.invert_yaw;
+    invert_pitch = read.invert_pitch;
+    invert_roll = read.invert_roll;
+    local_smoothing = read.local_smoothing;
+    remote_smoothing = read.remote_smoothing;
+    position_enabled = read.position_enabled;
+    pos_sens_x = read.pos_sens_x;
+    pos_sens_y = read.pos_sens_y;
+    pos_sens_z = read.pos_sens_z;
+    pos_limit_x = read.pos_limit_x;
+    pos_limit_y = read.pos_limit_y;
+    pos_limit_z = read.pos_limit_z;
+    pos_limit_z_back = read.pos_limit_z_back;
+    invert_pos_x = read.invert_pos_x;
+    invert_pos_y = read.invert_pos_y;
+    invert_pos_z = read.invert_pos_z;
+    disable_in_coop = read.disable_in_coop;
+    world_space_yaw = read.world_space_yaw;
+    vk_toggle = read.vk_toggle;
+    vk_cycle_mode = read.vk_cycle_mode;
+    vk_yaw_mode = read.vk_yaw_mode;
+    return status == legacy::ReadStatus::Read;
 }
 
 }  // namespace FarCry6HeadTracking

@@ -9,10 +9,13 @@ try {
     # PREVIOUS binary and reported green against source that no longer builds.
     cmake -B build-tests -A x64 -DFARCRY6_BUILD_TESTS=ON
     if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
-    cmake --build build-tests --config Release --target farcry6_tests
+    cmake --build build-tests --config Release --target farcry6_tests farcry6_config_differential
     if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
     & "build-tests\tests\Release\farcry6_tests.exe"
     if ($LASTEXITCODE -ne 0) { throw "unit tests failed" }
+    & "build-tests\tests\Release\farcry6_config_differential.exe"
+    if ($LASTEXITCODE -ne 0) { throw "config differential test failed" }
+    & "$repo\tests\config_differential\check-frozen.ps1"
 } finally {
     Pop-Location
 }

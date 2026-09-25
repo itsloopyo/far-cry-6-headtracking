@@ -31,6 +31,7 @@ add_library(FarCry6HeadTracking SHARED
     src/steam_offsets.cpp
     src/dllmain.cpp
     src/config.cpp
+    src/legacy_config/legacy_config.cpp
     src/mod.cpp
     src/hotkeys.cpp
     src/tracking_runtime.cpp
@@ -71,6 +72,7 @@ if(FARCRY6_BUILD_TESTS)
     add_executable(farcry6_tests
         tests/farcry6_tests.cpp
         src/config.cpp
+        src/legacy_config/legacy_config.cpp
         src/tracking_runtime.cpp
         src/tracker_info.cpp
         src/window_centering.cpp
@@ -90,4 +92,27 @@ if(FARCRY6_BUILD_TESTS)
         target_compile_options(farcry6_tests PRIVATE /W4 /WX /permissive-)
     endif()
     add_test(NAME farcry6_tests COMMAND farcry6_tests)
+
+    # The config differential test: v0.1.0's reader (the oracle) against the frozen
+    # reader in src/legacy_config, over every published build's first-run output and
+    # core's mutation corpus.
+    add_executable(farcry6_config_differential
+        tests/config_differential/differential_tests.cpp
+        tests/config_differential/oracle/oracle_config.cpp
+        src/legacy_config/legacy_config.cpp
+    )
+    target_include_directories(farcry6_config_differential PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential
+        ${CMAKE_CURRENT_SOURCE_DIR}/cameraunlock-core/cpp/include
+    )
+    target_compile_definitions(farcry6_config_differential PRIVATE
+        FARCRY6_DIFFERENTIAL_INPUTS="${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential/inputs")
+    target_link_libraries(farcry6_config_differential PRIVATE cameraunlock)
+    set_target_properties(farcry6_config_differential PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests")
+    if(MSVC)
+        target_compile_options(farcry6_config_differential PRIVATE /W4 /WX /permissive-)
+    endif()
+    add_test(NAME farcry6_config_differential COMMAND farcry6_config_differential)
 endif()

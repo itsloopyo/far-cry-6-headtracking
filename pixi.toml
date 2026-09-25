@@ -20,7 +20,8 @@ setup = { cmd = """
 build = { cmd = "cmake --build build --config Debug", depends-on = ["setup"] }
 build-release = { cmd = "cmake --build build --config Release", depends-on = ["setup"] }
 
-# Native unit tests for the sign and unit conversion and the INI guards.
+# Native unit tests, and the config differential test that holds the frozen legacy
+# reader to the published build's.
 test = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/run-tests.ps1" }
 
 # Build and deploy into the game directory.
@@ -31,7 +32,7 @@ uninstall = 'scripts\uninstall.cmd /y'
 # Package the installer ZIP. There is no Nexus ZIP: the mod replaces a file the game
 # ships in its own bin folder, which no mod manager can deploy or roll back, so it is
 # installer-only. Do not add a -nexus.zip stage here.
-package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build-release"] }
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build-release", "test"] }
 
 # The launcher manifest and the notices are what the launcher and the release ZIP
 # are trusted on, so both are checkable rather than reviewed by eye.
