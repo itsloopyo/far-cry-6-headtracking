@@ -1,7 +1,8 @@
 # The config differential test's record: the published builds, the frozen legacy reader,
-# and the core sources it compiles. check-frozen.ps1 fails when a working-tree path below
-# stops matching its hash. Rows naming <tag>:<path> or <core commit>:<path> are provenance,
-# the blobs the oracle and the import were taken from, and are not checked (CI clones no tags).
+# the core sources it compiles, and the oracle and first-run inputs the test measures it
+# against. check-frozen.ps1 fails when a working-tree path below stops matching its hash.
+# Rows naming <tag>:<path> or <core commit>:<path> are provenance, the blobs the oracle and
+# the import were taken from, and are not checked (CI clones no tags).
 #
 # Published builds: v0.1.0 at faf077b (cameraunlock-core 2eded2c), and the rolling dev
 # pre-release 0.0.0-nightly.20260917.dec1791 at dec1791 (cameraunlock-core c480d8a).
@@ -17,6 +18,11 @@ cameraunlock-core/cpp/src/config/value_guards.cpp	a833ff7f2721f7974ce039a3597349
 cameraunlock-core/cpp/include/cameraunlock/math/finite_utils.h	c59772d698d54ade3374ee1221b74f5563a86d76f0eb34a989ef7efab389c0ad	compiled by the import and the oracle; the same bytes at 2eded2c and c480d8a
 cameraunlock-core/cpp/include/cameraunlock/logging/file_log.h	43bdd2ef8554c78e5f440333463750c13b95110fe672b0b6e273244df9e7d169	compiled by the import and the oracle; the same bytes at 2eded2c and c480d8a
 cameraunlock-core/cpp/src/logging/file_log.cpp	73c53c2baa06bbfebe8211f62678aa2b60cb95f604743d3686951ba56b87ea47	compiled by the import and the oracle; the same bytes at 2eded2c and c480d8a
+tests/config_differential/oracle/oracle_config.h	c78fa17afc9a1b08c60d6f8d85056f85f568a7e21826d12da80cc3774f12839b	the oracle; v0.1.0:src/config.h with the namespace and the ADS include changed
+tests/config_differential/oracle/oracle_config.cpp	58d2c966443aab44e8c6a232150e68a4595f5e008aa705432b336cc3e545bd28	the oracle; v0.1.0:src/config.cpp with the namespace and the include changed
+tests/config_differential/oracle/oracle_ads.h	e6ac868690b1d0b90d2b63f13e9ea052023b344ddb707bec5f289f951433470e	the oracle; 2eded2c's ads_mode.h with v0.1.0's src/ads.h
+tests/config_differential/inputs/first-run-dec1791.ini	24a35a5ec59761d5131d26a0f838a0f3e60d880518eccb3fd09b1b3fc924d963	the first-run output of dev dec1791, extracted once
+tests/config_differential/inputs/first-run-v0.1.0.ini	c001271051aa7fd57bed493bc095285a605b7999ecd18afaaf0fe9143c8bdf34	the first-run output of v0.1.0, extracted once
 cameraunlock-core/cpp/include/cameraunlock/data/position_settings.h	b24dceb8e25475aebc5a468a5c7362a4a4e64204d183d1408525345f32f547f5	the oracle's defaults; the same bytes at 2eded2c
 cameraunlock-core/cpp/include/cameraunlock/math/smoothing_utils.h	fc2146f8c585e5f610c7234e302f59de4945679cfa28ff479ca47477ec073f22	the oracle's defaults; the same bytes at 2eded2c
 v0.1.0:src/config.h	379f45248ebad36cfc68575fc3a85661854ba942fb0f991ca94fe41095bcdaf9	oracle source

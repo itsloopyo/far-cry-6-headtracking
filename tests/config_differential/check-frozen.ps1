@@ -1,6 +1,7 @@
-# Fails when a file frozen.tsv records has changed: the frozen legacy reader, or a core
-# source it compiles. Each one is what an old FarCry6HeadTracking.ini is read through, so a
-# change moves what a player's old file converts to.
+# Fails when a file frozen.tsv records has changed: the frozen legacy reader, a core source
+# it compiles, the oracle, or a first-run input. The reader and its core sources are what an
+# old FarCry6HeadTracking.ini is read through, so a change moves what a player's old file
+# converts to; the oracle and the inputs are what the differential test holds that to.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $record = Join-Path $PSScriptRoot 'frozen.tsv'
@@ -17,6 +18,6 @@ foreach ($line in [System.IO.File]::ReadAllLines($record)) {
     if ($actual -ne $sha) { $changed += "$path is $actual, frozen.tsv records $sha" }
 }
 if ($changed.Count -gt 0) {
-    throw "Frozen config reader sources changed:`n  $($changed -join "`n  ")"
+    throw "Frozen config differential files changed:`n  $($changed -join "`n  ")"
 }
-Write-Host 'frozen config reader: unchanged'
+Write-Host 'frozen config differential files: unchanged'
