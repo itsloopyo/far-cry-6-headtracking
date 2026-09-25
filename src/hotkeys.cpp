@@ -6,11 +6,14 @@
 #include "logging.h"
 #include "mod.h"
 
-#include "cameraunlock/input/chord_hotkeys.h"
 #include "cameraunlock/input/hotkey_poller.h"
+#include "cameraunlock/input/key_binding_registration.h"
+#include "cameraunlock/input/key_bindings.h"
 
-#include <cstdio>
 #include <exception>
+#include <functional>
+#include <stdexcept>
+#include <string>
 
 namespace FarCry6HeadTracking {
 
@@ -23,47 +26,26 @@ constexpr int kPollIntervalMs = 16;
 cameraunlock::input::HotkeyPoller g_poller;
 bool g_started = false;
 
+// A plain key does not fire while Ctrl and Shift are both held, so Ctrl+Shift with
+// that key reaches only a binding that names the chord.
+void Register(const std::string& keys, const char* setting, std::function<void()> action) {
+    const cameraunlock::input::KeyBindingsParseResult parsed = cameraunlock::input::ParseKeyBindings(keys);
+    if (!parsed.ok()) {
+        // The config table read the list with the same parser, so this is a bug.
+        throw std::logic_error(std::string(setting) + "=" + keys + " is not a key list: " + parsed.error);
+    }
+    cameraunlock::input::RegisterKeyBindings(g_poller, parsed.bindings, std::move(action));
+}
+
 }  // namespace
 
-void StartHotkeys(const Config& cfg, TrackingRuntime& runtime) {
+void StartHotkeys(const Config& cfg) {
     if (g_started) return;
 
-    using cameraunlock::input::ChordGuarded;
-    using cameraunlock::input::NavGuarded;
-
-    auto onToggle = [&runtime]() { runtime.ToggleEnabled(); };
-    auto onCycleMode = [&runtime]() { runtime.CycleTrackingMode(); };
-    auto onYawMode = []() { Mod::Instance().ToggleYawMode(); };
-
-    const bool cycleKeyBound = cfg.vk_cycle_mode != cfg.vk_toggle;
-
-    // Nav-cluster keys are suppressed while Ctrl+Shift is held so the chord path is
-    // the sole trigger for Ctrl+Shift+<nav> combos - a single keypress never fires
-    // an action twice.
-    g_poller.SetToggleKey(cfg.vk_toggle, NavGuarded(onToggle));
-    // A rebind that puts both actions on one key would fire both from a single
-    // press, which reads in game as a stuck key: tracking toggles and the mode
-    // cycles together. The chords below still reach the second action.
-    if (!cycleKeyBound) {
-        Log::Line("WARN: INI [Hotkeys] Toggle and CycleMode are both 0x%02X. Only the "
-                  "toggle is bound to it; use Ctrl+Shift+G to cycle tracking mode.",
-                  cfg.vk_toggle);
-    } else {
-        g_poller.AddHotkey(cfg.vk_cycle_mode, NavGuarded(onCycleMode));
-    }
-
-    // The chords are not an alternative the user picks between: both sets are live at
-    // once, so a keyboard without a navigation cluster still reaches every action.
-    g_poller.AddHotkey('Y', ChordGuarded(onToggle));
-    g_poller.AddHotkey('G', ChordGuarded(onCycleMode));
-    g_poller.AddHotkey('H', ChordGuarded(onYawMode));
-    if (cfg.vk_yaw_mode != cfg.vk_toggle && cfg.vk_yaw_mode != cfg.vk_cycle_mode) {
-        g_poller.AddHotkey(cfg.vk_yaw_mode, NavGuarded(onYawMode));
-        Log::Line("Yaw mode hotkey: 0x%02X (or Ctrl+Shift+H)", cfg.vk_yaw_mode);
-    } else {
-        Log::Line("WARN: yaw mode key 0x%02X is already bound; use Ctrl+Shift+H",
-                  cfg.vk_yaw_mode);
-    }
+    Register(cfg.toggle_key_name, "ToggleKey", []() { Mod::Instance().Runtime().ToggleEnabled(); });
+    Register(cfg.cycle_tracking_mode_key_name, "CycleTrackingModeKey",
+             []() { Mod::Instance().CycleTrackingMode(); });
+    Register(cfg.yaw_mode_key_name, "YawModeKey", []() { Mod::Instance().ToggleYawMode(); });
 
     // The poller rethrows std::system_error when the process cannot spawn its
     // thread, deliberately, so the failure is not silent. Catch it here: this runs
@@ -81,14 +63,9 @@ void StartHotkeys(const Config& cfg, TrackingRuntime& runtime) {
         return;
     }
 
-    // The summary must not name a key a collision branch above declined to bind.
-    char cycleKey[32] = "Ctrl+Shift+G only";
-    if (cycleKeyBound) {
-        std::snprintf(cycleKey, sizeof(cycleKey), "0x%02X (or Ctrl+Shift+G)",
-                      cfg.vk_cycle_mode);
-    }
-    Log::Line("Hotkeys: toggle=0x%02X (or Ctrl+Shift+Y), cycle mode=%s",
-              cfg.vk_toggle, cycleKey);
+    Log::Line("Hotkeys: ToggleKey=%s, CycleTrackingModeKey=%s, YawModeKey=%s",
+              cfg.toggle_key_name.c_str(), cfg.cycle_tracking_mode_key_name.c_str(),
+              cfg.yaw_mode_key_name.c_str());
     g_started = true;
 }
 

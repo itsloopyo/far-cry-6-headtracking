@@ -8,6 +8,7 @@
 #include "cameraunlock/protocol/udp_receiver.h"
 #include "cameraunlock/time/frame_clock.h"
 #include "cameraunlock/tracking/head_tracking_session.h"
+#include "cameraunlock/tracking/tracking_mode.h"
 
 #include <atomic>
 
@@ -61,12 +62,13 @@ public:
     bool IsEnabled() const { return m_enabled.load(std::memory_order_relaxed); }
 
     void ToggleEnabled();
-    void CycleTrackingMode();
+    // Steps the session to the next tracking mode and returns it. Safe from the hotkey
+    // thread: the session's mode is atomic.
+    cameraunlock::TrackingMode CycleTrackingMode();
 
 private:
     static constexpr float kMaxFrameDtSec = 0.25f;
 
-    void ConfigureRotation();
     void ConfigurePosition();
     void ConfigureSmoothing();
 

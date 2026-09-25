@@ -10,16 +10,31 @@
 #include "window_centering.h"
 
 #include "cameraunlock/os/module_paths.h"
+#include "cameraunlock/tracking/tracking_mode.h"
 
 #include <windows.h>
 
 #include <string>
+#include <vector>
 
 namespace FarCry6HeadTracking {
 
 namespace {
 constexpr wchar_t kLogName[] = L"FarCry6HeadTracking.log";
-constexpr char kIniName[] = "FarCry6HeadTracking.ini";
+
+std::string Utf8(const std::wstring& text) {
+    const int size = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0,
+                                         nullptr, nullptr);
+    std::string out(static_cast<size_t>(size), ' ');
+    WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), out.data(), size, nullptr,
+                        nullptr);
+    return out;
+}
+
+void LogLines(const std::vector<std::string>& lines, const std::string& reason) {
+    for (const std::string& line : lines) Log::Line("%s", line.c_str());
+    if (!reason.empty()) Log::Line("%s", reason.c_str());
+}
 
 // Keeps this DLL mapped for the rest of the process.
 //
@@ -62,32 +77,47 @@ void Mod::OpenLog() {
 }
 
 bool Mod::LoadConfiguration() {
-    const std::string dir = cameraunlock::os::SelfModuleDirectoryNarrow();
+    const std::wstring dir = cameraunlock::os::SelfModuleDirectory();
     if (dir.empty()) {
         Log::Line("ERROR: could not resolve the directory this DLL was loaded from. "
                   "The mod will not start and the game will run as if no eye tracker "
                   "were present.");
         return false;
     }
-    const std::string iniPath = dir + "\\" + kIniName;
-    if (!m_cfg.LoadOrCreate(iniPath.c_str())) {
+    const std::wstring path = dir + L"\\" + kConfigFileName;
+    m_owner.emplace(ConfigOwnerOptionsFor(path));
+    cameraunlock::config::ConfigLoadResult<Config> loaded = m_owner->Load();
+    // install.cmd and uninstall.cmd tell this DLL from the game's own by these words
+    // (SHIM_MARKER), so every build has to carry them.
+    Log::Line("Far Cry 6 - Head Tracking configuration: %s, %s", Utf8(path).c_str(),
+              cameraunlock::config::ConfigLoadStatusName(loaded.status));
+    LogLines(loaded.log, loaded.reason);
+    // The build before the canonical format did not start on a file it refused, so
+    // this one does not either.
+    if (loaded.status == cameraunlock::config::ConfigLoadStatus::LegacyRefused) {
         return false;
     }
-    m_iniPath = iniPath;
+    m_cfg = std::move(loaded.config);
+
     m_worldSpaceYaw.store(m_cfg.world_space_yaw, std::memory_order_relaxed);
     Log::Line("Yaw mode: %s", m_cfg.world_space_yaw ? "world" : "camera-local");
-    Log::Line("Config loaded from %s", iniPath.c_str());
-    Log::Line("Port %u, enable on startup %s, position %s, disable in co-op %s",
+    Log::Line("Port %d, enable on startup %s, rotation %s, position %s, disable in co-op %s",
               m_cfg.udp_port,
-              m_cfg.enabled_on_startup ? "yes" : "no",
+              m_cfg.enable_on_startup ? "yes" : "no",
+              m_cfg.rotation_enabled ? "on" : "off",
               m_cfg.position_enabled ? "on" : "off",
               m_cfg.disable_in_coop ? "yes" : "no");
     return true;
 }
 
+void Mod::Save(const std::function<void(Config&)>& change) {
+    const cameraunlock::config::ConfigSaveResult saved = m_owner->Save(change);
+    LogLines(saved.log, saved.reason);
+}
+
 void Mod::StartSubsystems() {
     m_runtime.Start(m_cfg);
-    StartHotkeys(m_cfg, m_runtime);
+    StartHotkeys(m_cfg);
 
     const bool coopGateActive = StartCoopGate();
     m_coopGateActive.store(coopGateActive, std::memory_order_relaxed);
@@ -166,10 +196,10 @@ void Mod::Shutdown() {
 
     // m_startAttempted deliberately stays set. Restarting is not supported and
     // must not be made to look supported: StartHotkeys would push a second copy
-    // of every non-toggle binding onto a poller that has no way to drop the
-    // first, so one Ctrl+Shift+G press would step the mode cycle twice, and
-    // LoadConfiguration would rewrite the non-atomic Config while the render
-    // thread reads it. EnsureStarted says so out loud instead.
+    // of every binding onto a poller that has no way to drop the first, so one
+    // Ctrl+Shift+G press would step the mode cycle twice, and LoadConfiguration
+    // would rewrite the non-atomic Config while the render thread reads it.
+    // EnsureStarted says so out loud instead.
     Log::Line("Shutdown");
 }
 
@@ -200,12 +230,17 @@ bool Mod::TrackingAllowed() const {
 void Mod::ToggleYawMode() {
     const bool world = !WorldSpaceYaw();
     m_worldSpaceYaw.store(world, std::memory_order_relaxed);
-    if (!WritePrivateProfileStringA("Gameplay", "WorldSpaceYaw", world ? "1" : "0",
-                                    m_iniPath.c_str())) {
-        Log::Line("ERROR: could not save WorldSpaceYaw to %s (error %lu)",
-                  m_iniPath.c_str(), GetLastError());
-    }
     Log::Line("Yaw mode: %s", world ? "world" : "camera-local");
+    Save([world](Config& c) { c.world_space_yaw = world; });
+}
+
+void Mod::CycleTrackingMode() {
+    const cameraunlock::TrackingModeChannels channels =
+        cameraunlock::EncodeTrackingMode(m_runtime.CycleTrackingMode());
+    Save([channels](Config& c) {
+        c.rotation_enabled = channels.rotation_enabled;
+        c.position_enabled = channels.position_enabled;
+    });
 }
 
 }  // namespace FarCry6HeadTracking

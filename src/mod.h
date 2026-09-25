@@ -7,7 +7,8 @@
 #include "tracking_runtime.h"
 
 #include <atomic>
-#include <string>
+#include <functional>
+#include <optional>
 
 namespace FarCry6HeadTracking {
 
@@ -48,16 +49,22 @@ public:
     bool TrackingAllowed() const;
 
     bool WorldSpaceYaw() const { return m_worldSpaceYaw.load(std::memory_order_relaxed); }
+
+    // Both switch the mode and then save it, from the hotkey thread.
     void ToggleYawMode();
+    void CycleTrackingMode();
 
     void OpenLog();
 
 private:
     Mod() = default;
 
-    // Reads the INI beside this DLL, reporting what it found. False means the mod
-    // cannot start at all, which is a state the shim still answers the game from.
+    // Reads the settings file beside this DLL, converting a pre-canonical one, and logs
+    // what it found. False means the mod cannot start at all, which is a state the shim
+    // still answers the game from.
     bool LoadConfiguration();
+
+    void Save(const std::function<void(Config&)>& change);
 
     // Brings up everything that outlives the call: the receiver, the hotkey thread,
     // the co-op watch and the window centring wait.
@@ -71,8 +78,8 @@ private:
     std::atomic<bool> m_paused{false};
     std::atomic<bool> m_inCoop{false};
     std::atomic<bool> m_coopGateActive{false};
-    std::atomic<bool> m_worldSpaceYaw{kDefaultWorldSpaceYaw};
-    std::string m_iniPath;
+    std::atomic<bool> m_worldSpaceYaw{true};
+    std::optional<cameraunlock::config::ConfigOwner<Config>> m_owner;
     Config m_cfg{};
     TrackingRuntime m_runtime;
 };

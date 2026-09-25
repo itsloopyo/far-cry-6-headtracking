@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- `FarCry6HeadTracking.ini` has a new layout. The first time this version starts, it converts the file once into the new layout and keeps the file as it was beside it as `FarCry6HeadTracking.ini.pre-canonical`. `FarCry6HeadTracking.ini.pre-canonical.last`, when present, is the file as it was before the most recent conversion: the mod converts the file again when it finds the older layout later, for example after an older version of the mod rewrote it.
+- Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:
+  - A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
+- Hotkeys are written as key names, and each hotkey lists every key that triggers it, the Ctrl+Shift chord included: `ToggleKey=End, Ctrl+Shift+Y`. The chords were always on before; now each one can be changed or removed like any other key.
+- Settings moved: `[General] Port` is `[Network] UdpPort`, `[Gameplay] WorldSpaceYaw` is `[General] WorldSpaceYaw`, the `[Position]` limits are `PositionLimitX`, `PositionLimitY`, `PositionLimitYDown`, `PositionLimitZ` and `PositionLimitZBack`, and `[Hotkeys] Toggle`, `CycleMode` and `YawMode` are `ToggleKey`, `CycleTrackingModeKey` and `YawModeKey`. `LimitY` bounded both directions, so it becomes both `PositionLimitY` and `PositionLimitYDown`. `[Position] Enabled` chose the tracking mode at startup; that is now the pair `RotationEnabled` and `PositionEnabled`. The conversion carries every one of these values over.
+- The tracking mode that Page Up or Ctrl+Shift+G selects is now saved and comes back at the next start, as the yaw mode already did.
+- An older version of the mod may not read the new layout correctly. It reads a key that moved as its own default, and it can misread a hotkey or another value that is now written as a name. To go back to an older version, first copy `FarCry6HeadTracking.ini.pre-canonical` back over `FarCry6HeadTracking.ini`, which restores the old file.
+- `uninstall.cmd` keeps `bin\FarCry6HeadTracking.ini` and its `.pre-canonical` copies, so your settings survive a reinstall.
+- Since v0.1.0, `[Gameplay] AdsMode` and `[Hotkeys] AdsMode` are no longer read, and neither Insert nor Ctrl+Shift+U cycles an ADS mode: head tracking carries on through the sights in every case, and the lean eases out while they are up (faefd67).
+- Since v0.1.0, a `[Hotkeys] YawMode` on the same key as `[Hotkeys] AdsMode` switches the yaw mode; v0.1.0 left it unbound (faefd67).
+
+### Removed
+
+- The sensitivity and axis inversion settings (`[Sensitivity]` and `[Position] SensitivityX/Y/Z`, `InvertX/Y/Z`). Set these in your tracker app instead. They shipped at 1 and off, so with them at their shipped values the camera moves as it did before.
+
 ## [0.0.0] - 2026-09-08
 
 ### Added

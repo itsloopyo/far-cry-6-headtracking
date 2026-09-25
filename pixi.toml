@@ -24,6 +24,12 @@ build-release = { cmd = "cmake --build build --config Release", depends-on = ["s
 # reader to the published build's.
 test = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/run-tests.ps1" }
 
+# Rewrites config/FarCry6HeadTracking.ini from the config table after a change to a row,
+# a comment or a default. The unit tests fail until it has run. There is no launcher seed
+# to re-encode; encode-seed says so.
+render-config = { cmd = "build-tests/tests/Release/farcry6_tests.exe --render-config config/FarCry6HeadTracking.ini && node cameraunlock-core/scripts/encode-seed.mjs", depends-on = ["build-tests"] }
+build-tests = { cmd = "cmake -B build-tests -A x64 -DFARCRY6_BUILD_TESTS=ON && cmake --build build-tests --config Release --target farcry6_tests" }
+
 # Build and deploy into the game directory.
 install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 -Configuration Release", depends-on = ["build-release"] }
 

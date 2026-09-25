@@ -15,6 +15,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "unit tests failed" }
     & "build-tests\tests\Release\farcry6_config_differential.exe"
     if ($LASTEXITCODE -ne 0) { throw "config differential test failed" }
+    node tests\config_differential\lint-migrated.mjs build-tests\tests\Release\migrated
+    if ($LASTEXITCODE -ne 0) { throw "canonical config lint failed" }
     & "$repo\tests\config_differential\check-frozen.ps1"
 } finally {
     Pop-Location

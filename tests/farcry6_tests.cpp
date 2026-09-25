@@ -2,8 +2,8 @@
 // Copyright (c) 2026 itsloopyo
 
 // Covers the pure logic between the tracking pipeline and the game: the sign and
-// unit conversion the pose crosses on its way out, the INI guards that decide what
-// reaches it, and the tracker description the game is answered with, which is what
+// unit conversion the pose crosses on its way out, the settings file and what its
+// hotkeys save, and the tracker description the game is answered with, which is what
 // decides which of its eye tracking features come up. Plus one test that is not
 // pure logic at all - the mod reclaiming a tracker port another program was
 // holding - because that is a property of this mod's wiring rather than of the
@@ -17,7 +17,10 @@
 #include "tracking_runtime.h"
 #include "window_centering.h"
 
+#include "legacy_config/legacy_config.h"
+
 #include "cameraunlock/config/value_guards.h"
+#include "cameraunlock/tracking/tracking_mode.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -28,8 +31,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace FarCry6HeadTracking;
 
@@ -49,6 +56,17 @@ void CheckNear(float actual, float expected, const char* what) {
         std::printf("FAIL: %s (got %.6f, wanted %.6f)\n", what, actual, expected);
         ++g_failures;
     }
+}
+
+template <class Path>
+std::string ReadBytes(const Path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+void WriteBytes(const std::wstring& path, const std::string& bytes) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
 
 FrameSample Rotation(float yaw, float pitch, float roll) {
@@ -268,87 +286,112 @@ void TestSanitizers() {
           "a plain decimal parses");
 }
 
-// The INI is a system boundary, so the guards above are reached through a real
-// file here rather than only called directly.
-void TestConfigRejectsMalformedNumbers() {
-    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") +
-                             "\\farcry6_ht_malformed.ini";
-    std::remove(path.c_str());
-
-    FILE* f = std::fopen(path.c_str(), "w");
-    Check(f != nullptr, "the malformed test INI can be written");
-    if (f) {
-        // A decimal comma, an inline comment, and a value that would overflow the
-        // pose it multiplies.
-        //
-        // The comma goes on RemoteSmoothing, whose default is 0.15, and NOT on
-        // LocalSmoothing, whose default is 0.0. A prefix parse of "0,15" yields
-        // 0.0, so asserting the LocalSmoothing default would pass whether the
-        // strict parse ran or not: it is the bug's own output.
-        std::fputs("[General]\nPort=4242\n"
-                   "[Smoothing]\nRemoteSmoothing=0,15\nLocalSmoothing=0.25 ; settle\n"
-                   "[Sensitivity]\nYaw=3e38\n",
-                   f);
-        std::fclose(f);
-    }
-
-    Config cfg;
-    Check(cfg.LoadOrCreate(path.c_str()), "a malformed value still loads the file");
-    CheckNear(cfg.remote_smoothing, kDefaultRemoteSmoothing,
-              "a decimal comma falls back instead of silently reading as zero");
-    CheckNear(cfg.local_smoothing, 0.25f, "an inline comment is stripped, not parsed");
-    CheckNear(cfg.sens_yaw, cameraunlock::config::kMaxSensitivity,
-              "a sensitivity that would overflow the pose is bounded at the INI");
-    std::remove(path.c_str());
+// The settings file the repo commits is what the table renders from its defaults, byte
+// for byte. `pixi run render-config` rewrites it after a change to a row.
+void TestCommittedConfigIsRendered() {
+    const auto table = ConfigTable();
+    const std::string rendered =
+        cameraunlock::config::RenderCanonical(table, table.defaults(), {kGameDisplayName});
+    Check(ReadBytes(FARCRY6_COMMITTED_CONFIG) == rendered,
+          "config/FarCry6HeadTracking.ini is the table rendered from its defaults (pixi run render-config)");
 }
 
-// The port is the one setting a user can get wrong in a way the mod cannot work
-// around, so it is the one config error that refuses to start.
-void TestConfigPort() {
-    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") +
-                             "\\farcry6_ht_test.ini";
-    std::remove(path.c_str());
-
-    Config created;
-    Check(created.LoadOrCreate(path.c_str()), "a missing INI is created and read");
-    Check(created.udp_port == kDefaultPort, "the created INI carries the default port");
-    Check(created.world_space_yaw && created.vk_yaw_mode == 0x22,
-          "the generated INI defaults to world yaw and Page Down");
-
-    FILE* f = std::fopen(path.c_str(), "w");
-    Check(f != nullptr, "the test INI can be rewritten");
-    if (f) {
-        std::fputs("[General]\nPort=70000\n", f);
-        std::fclose(f);
+// A fresh install and an upgrade from the defaults of the last pre-canonical build start
+// the same: the map of that build's defaults holds every row at the table's default.
+void TestLegacyDefaultsMapToTheDefaults() {
+    const auto table = ConfigTable();
+    Config mapped = table.defaults();
+    const auto result = MapLegacyConfig(legacy::ReadStatus::Absent, legacy::Config{}, mapped);
+    Check(result.status == cameraunlock::config::ImportStatus::Absent && result.dropped.empty(),
+          "the old defaults drop nothing");
+    Check(result.pose_shaping.size() == 12, "every sensitivity and inversion is recorded");
+    for (const auto& value : result.pose_shaping) {
+        Check(value.folded, "every shipped sensitivity and inversion is identity");
     }
-    Config bad;
-    Check(!bad.LoadOrCreate(path.c_str()), "an out-of-range port refuses to load");
+    Check(cameraunlock::config::RenderCanonical(table, mapped, {kGameDisplayName}) ==
+              cameraunlock::config::RenderCanonical(table, table.defaults(), {kGameDisplayName}),
+          "the old defaults map to the defaults");
+    Check(mapped.toggle_key_name == "End, Ctrl+Shift+Y" &&
+              mapped.cycle_tracking_mode_key_name == "PageUp, Ctrl+Shift+G" &&
+              mapped.yaw_mode_key_name == "PageDown, Ctrl+Shift+H",
+          "the old hotkeys and their always-on chords become the fleet's key lists");
+}
 
-    f = std::fopen(path.c_str(), "w");
-    Check(f != nullptr, "the test INI can be rewritten for the limit case");
-    if (f) {
-        std::fputs("[General]\nPort=4242\n[Position]\nLimitZ=-1\n"
-                   "[Gameplay]\nWorldSpaceYaw=0\n[Hotkeys]\nYawMode=0x70\n", f);
-        std::fclose(f);
+std::vector<std::string> Lines(const std::string& bytes) {
+    std::vector<std::string> lines;
+    size_t start = 0;
+    while (start < bytes.size()) {
+        const size_t end = bytes.find("\r\n", start);
+        lines.push_back(bytes.substr(start, end - start));
+        start = end + 2;
     }
-    Config recovered;
-    Check(recovered.LoadOrCreate(path.c_str()), "a bad limit still loads");
-    Check(!recovered.world_space_yaw && recovered.vk_yaw_mode == 0x70,
-          "saved local yaw and a rebound yaw key load from the INI");
-    CheckNear(recovered.pos_limit_z, kDefaultPosLimitZ, "a negative LimitZ falls back");
+    return lines;
+}
 
-    // ReadInt answers 0 for a present but unparseable value rather than the
-    // default, so this reached the user as a reported port of 0 they never typed.
-    f = std::fopen(path.c_str(), "w");
-    Check(f != nullptr, "the test INI can be rewritten for the unparseable port");
-    if (f) {
-        std::fputs("[General]\nPort=abc\n", f);
-        std::fclose(f);
+// The lines of `after` that differ from `before`, which must have as many lines.
+std::vector<std::string> ChangedLines(const std::string& before, const std::string& after) {
+    const std::vector<std::string> a = Lines(before);
+    const std::vector<std::string> b = Lines(after);
+    if (a.size() != b.size()) return {"a line was added or removed"};
+    std::vector<std::string> changed;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (a[i] != b[i]) changed.push_back(b[i]);
     }
-    Config unparseable;
-    Check(!unparseable.LoadOrCreate(path.c_str()),
-          "a port that is not a number refuses to load");
-    std::remove(path.c_str());
+    return changed;
+}
+
+// A save changes the lines of its rows and no other byte, the yaw mode and the tracking
+// mode persist, and End's row cannot be saved at all.
+void TestTogglesSave() {
+    using cameraunlock::config::ConfigLoadStatus;
+    using cameraunlock::config::ConfigOwner;
+    using cameraunlock::config::ConfigSaveStatus;
+
+    wchar_t temp[MAX_PATH];
+    GetTempPathW(MAX_PATH, temp);
+    const std::wstring dir = std::wstring(temp) + L"farcry6-config-save-" + std::to_wstring(GetCurrentProcessId());
+    CreateDirectoryW(dir.c_str(), nullptr);
+    const std::wstring path = dir + L"\\" + kConfigFileName;
+    const std::string committed = ReadBytes(FARCRY6_COMMITTED_CONFIG);
+    WriteBytes(path, committed);
+
+    {
+        ConfigOwner<Config> owner(ConfigOwnerOptionsFor(path));
+        Check(owner.Load().status == ConfigLoadStatus::Canonical, "the committed file loads as canonical");
+
+        Check(owner.Save([](Config& c) { c.world_space_yaw = false; }).status == ConfigSaveStatus::Saved,
+              "the yaw mode saves");
+        const std::string afterYaw = ReadBytes(path);
+        Check(ChangedLines(committed, afterYaw) == std::vector<std::string>{"WorldSpaceYaw=false"},
+              "saving the yaw mode changes its line and nothing else");
+
+        const auto channels = cameraunlock::EncodeTrackingMode(cameraunlock::TrackingMode::RotationOnly);
+        Check(owner.Save([channels](Config& c) {
+                  c.rotation_enabled = channels.rotation_enabled;
+                  c.position_enabled = channels.position_enabled;
+              }).status == ConfigSaveStatus::Saved,
+              "the tracking mode saves");
+        Check(ChangedLines(afterYaw, ReadBytes(path)) == std::vector<std::string>{"PositionEnabled=false"},
+              "saving rotation only changes PositionEnabled and nothing else");
+
+        bool refused = false;
+        try {
+            owner.Save([](Config& c) { c.enable_on_startup = false; });
+        } catch (const std::logic_error&) {
+            refused = true;
+        }
+        Check(refused, "EnableOnStartup is not Writable, so the End toggle cannot persist");
+    }
+
+    ConfigOwner<Config> reopened(ConfigOwnerOptionsFor(path));
+    const auto again = reopened.Load();
+    Check(again.status == ConfigLoadStatus::Canonical && again.diagnostics.empty() &&
+              !again.config.world_space_yaw && again.config.rotation_enabled && !again.config.position_enabled &&
+              again.config.enable_on_startup,
+          "the saved yaw and tracking mode come back at the next start");
+
+    DeleteFileW(path.c_str());
+    RemoveDirectoryW(dir.c_str());
 }
 
 // A user who launches this game while the last one is still running finds the
@@ -462,105 +505,6 @@ void TestApiVersionGate() {
     Check(!tobii::IsSupportedApiVersion(9, 0), "the published 9.x layout is refused");
     Check(!tobii::IsSupportedApiVersion(6, 3), "an older major is refused");
     Check(!tobii::IsSupportedApiVersion(0, 0), "an unset version is refused");
-}
-
-// Binds a UDP port, notes it and gives it straight back, so the runtime under
-// test has a port nothing else on the machine is sitting on.
-uint16_t FindFreeUdpPort(uint16_t first, uint16_t last) {
-    for (uint16_t candidate = first; candidate < last; ++candidate) {
-        SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (s == INVALID_SOCKET) return 0;
-        sockaddr_in addr;
-        std::memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(candidate);
-        addr.sin_addr.s_addr = INADDR_ANY;
-        const bool bound = bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0;
-        closesocket(s);
-        if (bound) return candidate;
-    }
-    return 0;
-}
-
-// The pipeline finite-checks the wire, and the INI guards check what the user
-// typed, but neither covers their PRODUCT: a sensitivity that is finite on its
-// own overflows the pose it multiplies, and infinity in the transformation
-// leaves the view somewhere the player cannot recover from. The guard has to
-// drop the poisoned channel and only that channel, so a bad Sensitivity value
-// does not also take positional tracking down with it.
-void TestNonFiniteRotationIsDropped() {
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        Check(false, "winsock starts up for the overflow test");
-        return;
-    }
-    const uint16_t port = FindFreeUdpPort(51733, 51765);
-    if (port == 0) {
-        Check(false, "a free loopback port is available for the overflow test");
-        WSACleanup();
-        return;
-    }
-
-    Config cfg;
-    cfg.udp_port = port;
-    // Set on the struct directly, NOT through the INI: ReadSensitivity would bound
-    // this to kMaxSensitivity. Large enough that any real head angle multiplied by
-    // it leaves float range, which is what the runtime guard has to catch.
-    cfg.sens_yaw = 3.0e38f;
-
-    TrackingRuntime runtime;
-    runtime.Start(cfg);
-
-    std::atomic<bool> senderStop(false);
-    std::thread sender([&senderStop, port] {
-        SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (s == INVALID_SOCKET) return;
-        sockaddr_in to;
-        std::memset(&to, 0, sizeof(to));
-        to.sin_family = AF_INET;
-        to.sin_port = htons(port);
-        inet_pton(AF_INET, "127.0.0.1", &to.sin_addr);
-        int n = 0;
-        while (!senderStop.load(std::memory_order_relaxed)) {
-            // Position in centimetres, rotation in degrees. Both jitter: the
-            // receiver holds a pose that repeats bit for bit, because that is
-            // what a tracker which has lost the head looks like.
-            double pose[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-            const double jitter = 0.01 * static_cast<double>(n % 50);
-            pose[0] = 5.0 + jitter;   // x, 5cm of lean
-            pose[3] = 2.0 + jitter;   // yaw
-            sendto(s, reinterpret_cast<const char*>(pose), sizeof(pose), 0,
-                   reinterpret_cast<sockaddr*>(&to), sizeof(to));
-            ++n;
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
-        }
-        closesocket(s);
-    });
-
-    FrameSample sample;
-    const auto started = std::chrono::steady_clock::now();
-    while (std::chrono::duration<double, std::milli>(
-               std::chrono::steady_clock::now() - started).count() < 3000.0) {
-        sample = runtime.SampleFrame();
-        if (sample.has_position) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(4));
-    }
-
-    // Asserted inside the success branch. A timed-out wait leaves `sample` default
-    // constructed, whose has_rotation is already false, so a bare assertion here
-    // would report a pass off the very failure the line above reports.
-    Check(sample.has_position, "the tracker reaches the runtime for the overflow test");
-    if (sample.has_position) {
-        Check(!sample.has_rotation, "a rotation that overflowed to non-finite is dropped");
-        Check(std::isfinite(sample.pos_x) && std::isfinite(sample.pos_y) &&
-                  std::isfinite(sample.pos_z),
-              "the position channel survives a poisoned rotation channel");
-    }
-
-    runtime.Stop();
-    senderStop.store(true);
-    sender.join();
-    WSACleanup();
 }
 
 }  // namespace
@@ -733,7 +677,21 @@ void TestZoomScaling() {
     CheckNear(zoomed.position.z, 20.0f, "the lean scales with the zoom (z)");
 }
 
-int main() {
+int main(int argc, char** argv) {
+    // `pixi run render-config`: write the committed settings file and run nothing else.
+    if (argc == 3 && std::strcmp(argv[1], "--render-config") == 0) {
+        const auto table = ConfigTable();
+        const std::string rendered =
+            cameraunlock::config::RenderCanonical(table, table.defaults(), {kGameDisplayName});
+        std::ofstream out(argv[2], std::ios::binary | std::ios::trunc);
+        out.write(rendered.data(), static_cast<std::streamsize>(rendered.size()));
+        if (!out) {
+            std::printf("could not write %s\n", argv[2]);
+            return 1;
+        }
+        return 0;
+    }
+
     TestRotationSigns();
     TestExtendedViewRadians();
     TestRenderAxes();
@@ -743,11 +701,11 @@ int main() {
     TestChannelsAreIndependent();
     TestTrackerDescription();
     TestSanitizers();
-    TestConfigRejectsMalformedNumbers();
-    TestConfigPort();
+    TestCommittedConfigIsRendered();
+    TestLegacyDefaultsMapToTheDefaults();
+    TestTogglesSave();
     TestApiVersionGate();
     TestUdpPortRecovery();
-    TestNonFiniteRotationIsDropped();
     TestWindowCentring();
     TestAdsLeanEasing();
     TestZoomScaling();

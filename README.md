@@ -86,8 +86,8 @@ launch, repeat the two steps above in `bin_plus` as well.
    **4242**.
 5. Press **Start**.
 
-The mod listens on 4242 unless `Port` in the INI says otherwise. If something else on
-the PC already has that port, change it in both places.
+The mod listens on 4242 unless `UdpPort` in `FarCry6HeadTracking.ini` says otherwise. If
+something else on the PC already has that port, change it in both places.
 
 ### VR Headset Setup
 
@@ -134,7 +134,8 @@ button, or SteamVR's view reset. The mod applies whatever pose the tracker sends
 
 ## Controls
 
-Two equivalent binding sets, use whichever your keyboard has:
+Each action has a nav-cluster key and a Ctrl+Shift chord, so a keyboard without a nav
+cluster still reaches all of them:
 
 | Action              | Nav-cluster | Chord           |
 |---------------------|-------------|-----------------|
@@ -151,9 +152,16 @@ Two equivalent binding sets, use whichever your keyboard has:
 
 `Page Down` switches yaw between the game's reference up axis (world) and the
 camera's up axis (local). The difference is visible when looking up or down with
-the mouse or controller, then turning your head. The selection is saved as
-`[Gameplay] WorldSpaceYaw` (`1` for world, `0` for local). Rebind the key with
-`[Hotkeys] YawMode` (default `0x22`).
+the mouse or controller, then turning your head.
+
+The tracking mode and the yaw mode are saved to `FarCry6HeadTracking.ini` the moment
+you change them, so the game starts in the mode you left it in. `End` changes the
+current session only: the game starts with head tracking on or off as
+`EnableOnStartup` says.
+
+Each hotkey is a list of keys in the `[Hotkeys]` section of the settings file, chords
+included, and every item in a list can be changed or removed:
+`ToggleKey=End, Ctrl+Shift+Y`.
 
 ### Aiming down sights
 
@@ -165,67 +173,82 @@ while the sights are up, because it would move your eye off them.
 
 ## Configuration
 
-`FarCry6HeadTracking.ini` is written next to the mod DLL in `<Far Cry 6>\bin` the
-first time the game runs. It is read once, when the game starts.
+The mod reads its settings when the game starts. Apart from creating or converting the
+file then, it writes to it only when a hotkey changes the tracking mode or the yaw mode.
+
+<!-- cameraunlock:config -->
+The mod reads its settings from `bin\FarCry6HeadTracking.ini` in the game folder, and creates the file when it starts and finds none. Edit it with any text editor.
+
+Earlier versions of the mod used an older layout for this file. The first time this version starts, it converts the file once into the layout below and keeps the file as it was beside it as `FarCry6HeadTracking.ini.pre-canonical`. `FarCry6HeadTracking.ini.pre-canonical.last`, when present, is the file as it was before the most recent conversion: the mod converts the file again when it finds the older layout later, for example after an older version of the mod rewrote it.
+
+Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:
+
+- Reticle settings, and a key that toggled the reticle.
+- A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
+- The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
+
+An older version of the mod may not read the new layout correctly. It reads a key that moved as its own default, and it can misread a hotkey or another value that is now written as a name. To go back to an older version, first copy `FarCry6HeadTracking.ini.pre-canonical` back over `FarCry6HeadTracking.ini`, which restores the old file.
+
+With every setting at its default, the file reads:
 
 ```ini
-; Far Cry 6 - Head Tracking configuration
-; Lives next to tobii_gameintegration_x64.dll in the game bin folder.
+; Far Cry 6 head tracking settings.
+; Comments start with ; and go on their own line. Text after a value is part of the value.
+; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; leave empty for none.
+
+[CameraUnlock]
+; Written by the mod. Leave this section in place.
+ConfigFormat=1
+
+[Network]
+; UDP port the mod receives tracker data on (OpenTrack protocol).
+UdpPort=4242
 
 [General]
-EnableOnStartup=1
-; UDP port the tracker sends OpenTrack packets to. Point your tracker
-; output at this port.
-Port=4242
-
-[Sensitivity]
-Yaw=1
-Pitch=1
-Roll=1
-; Flip an axis only if your tracker reports it backwards. The sign
-; conversion the game needs is already applied; these three ship off.
-InvertYaw=0
-InvertPitch=0
-InvertRoll=0
+; true: head tracking is on when the game starts. ToggleKey turns it on and off.
+EnableOnStartup=true
+; true: yaw turns around the world's up axis. false: around the camera's own up axis.
+WorldSpaceYaw=true
+; true: turning your head turns the view.
+; Tracking mode at startup, with PositionEnabled. The mode hotkey changes both.
+RotationEnabled=true
 
 [Smoothing]
-; Chosen per connection from the source address; covers rotation and position.
-; Only a loopback sender counts as local. A tracker on this PC that sends to
-; this machine LAN address instead of 127.0.0.1 is classified as remote.
-LocalSmoothing=0
+; Smoothing when the tracker runs on this PC. 0 is the least, 1 the most.
+LocalSmoothing=0.0
+; Smoothing when the tracker is another device on the network, such as a phone.
+; 0 is the least, 1 the most.
 RemoteSmoothing=0.15
 
 [Position]
-; Positional tracking. Limits are metres of head travel.
-; The camera's collision query shortens a lean near an obstruction.
-Enabled=1
-SensitivityX=1
-SensitivityY=1
-SensitivityZ=1
-LimitX=0.3
-LimitY=0.2
-LimitZ=0.4
-LimitZBack=0.1
-; As above: only for a tracker that reports an axis backwards. Leaving these
-; off is what keeps LimitZ on leaning in and LimitZBack on pulling away.
-InvertX=0
-InvertY=0
-InvertZ=0
-
-[Gameplay]
-; Hold the view still while another player is in the session, so co-op runs
-; the stock camera. Set to 0 to keep head tracking in co-op.
-DisableInCoop=1
-WorldSpaceYaw=1
+; true: moving your head moves the view.
+; Tracking mode at startup, with RotationEnabled. The mode hotkey changes both.
+PositionEnabled=true
+; How far, in metres, leaning left or right can move the view.
+PositionLimitX=0.3
+; How far, in metres, raising your head can move the view.
+PositionLimitY=0.2
+; How far, in metres, lowering your head can move the view.
+PositionLimitYDown=0.2
+; How far, in metres, leaning forward can move the view.
+PositionLimitZ=0.4
+; How far, in metres, leaning back can move the view.
+PositionLimitZBack=0.1
 
 [Hotkeys]
-; Virtual-key codes. Defaults: End (toggle), Page Up (cycle tracking mode).
-Toggle=0x23
-CycleMode=0x21
-YawMode=0x22
-; Ctrl+Shift+Y (toggle) and Ctrl+Shift+G (cycle tracking mode) fire the same
-; actions on a keyboard with no navigation cluster. They are always registered.
+; Turns head tracking on and off.
+ToggleKey=End, Ctrl+Shift+Y
+; Changes the tracking mode: rotation and position, rotation only, position only.
+CycleTrackingModeKey=PageUp, Ctrl+Shift+G
+; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
+YawModeKey=PageDown, Ctrl+Shift+H
+
+[Gameplay]
+; true: head tracking holds the view still while another player is in the session,
+; so co-op runs the game's own camera.
+DisableInCoop=true
 ```
+<!-- /cameraunlock:config -->
 
 ## Troubleshooting
 
@@ -262,7 +285,7 @@ every 600 frames carrying the pose being handed to the game.
   The log says `Bound UDP port 4242 ... tracking is live` when it does.
 - If nothing is holding the port, read the error the log quotes. Error 10013 means
   Windows has that port reserved (Hyper-V and WSL each reserve blocks of the high
-  range); pick a different `Port` in the INI.
+  range); pick a different `UdpPort` in `FarCry6HeadTracking.ini`.
 
 **Jittery or unstable tracking**
 
@@ -273,8 +296,8 @@ every 600 frames carrying the pose being handed to the game.
 
 **The view moves the wrong way on an axis**
 
-- Set the matching `Invert...` key in the INI. Report it as well; the shipped signs
-  are meant to be right for every tracker.
+- Invert that axis in your tracker, and report it: the mod's own signs are meant to
+  be right for every tracker, and it has no inversion setting of its own.
 
 **The view holds still in menus, the map and cutscenes**
 
@@ -314,12 +337,14 @@ every 600 frames carrying the pose being handed to the game.
 
 ## Updating
 
-Download the new release and run `install.cmd` again. Your config is preserved.
+Download the new release and run `install.cmd` again. Your settings file is kept.
 
 ## Uninstalling
 
 Run `uninstall.cmd`. It restores the original library from the `.backup` beside it
-and removes the mod's INI and log. There is no separate mod loader to take away, so
+and removes the mod's log. `bin\FarCry6HeadTracking.ini` is kept, with the
+`.pre-canonical` copies beside it, so your settings are still there if you install
+again. There is no separate mod loader to take away, so
 `uninstall.cmd /force` is accepted but has nothing extra to remove here.
 
 If you copied the mod into `bin_plus` by hand, undo that by hand as well: rename

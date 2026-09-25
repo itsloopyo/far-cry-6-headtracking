@@ -57,6 +57,18 @@ if (-not (Test-Path $dllPath)) {
     throw "$payload not found at: $dllPath. Run 'pixi run build-release' first."
 }
 
+# install.cmd and uninstall.cmd tell this mod's DLL from the game's own by SHIM_MARKER. A
+# build without those bytes would be backed up as the game's original on the next upgrade,
+# and put back by the uninstall.
+if ($installCmdText -notmatch 'set "SHIM_MARKER=([^"]+)"') {
+    throw "Could not parse SHIM_MARKER from scripts/install.cmd"
+}
+$shimMarker = $Matches[1]
+$latin1 = [System.Text.Encoding]::GetEncoding(28591)
+if (-not $latin1.GetString([System.IO.File]::ReadAllBytes($dllPath)).Contains($shimMarker)) {
+    throw "$payload does not carry the SHIM_MARKER bytes '$shimMarker', so the installer would take it for the game's own file."
+}
+
 $scriptsDir = Join-Path $projectDir 'scripts'
 foreach ($s in @('install.cmd', 'uninstall.cmd')) {
     if (-not (Test-Path (Join-Path $scriptsDir $s))) {

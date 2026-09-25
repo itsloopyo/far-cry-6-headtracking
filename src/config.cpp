@@ -3,161 +3,141 @@
 
 #include "config.h"
 
-#include "logging.h"
 #include "legacy_config/legacy_config.h"
 
-#include "cameraunlock/config/ini_reader.h"
+#include "cameraunlock/config/head_tracking_config_table.h"
+#include "cameraunlock/config/value_codecs.h"
+#include "cameraunlock/input/key_bindings.h"
 
-#include <windows.h>
-
-#include <cstring>
-#include <string>
+#include <utility>
+#include <vector>
 
 namespace FarCry6HeadTracking {
 
 namespace {
 
-bool FileExists(const char* path) {
-    return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
-}
+namespace cfg = cameraunlock::config;
+using cameraunlock::input::FormatKeyBindings;
+using cameraunlock::input::KeyBinding;
+using cameraunlock::input::KeyModifiers;
 
-void WriteGeneralSection(cameraunlock::IniWriter& w) {
-    w.WriteSection("General");
-    w.WriteBool("EnableOnStartup", kDefaultEnableOnStartup);
-    w.WriteComment("UDP port the tracker sends OpenTrack packets to. Point your tracker");
-    w.WriteComment("output at this port.");
-    w.WriteInt("Port", kDefaultPort);
-}
-
-void WriteSensitivitySection(cameraunlock::IniWriter& w) {
-    w.WriteSection("Sensitivity");
-    w.WriteDouble("Yaw", kDefaultSensitivity);
-    w.WriteDouble("Pitch", kDefaultSensitivity);
-    w.WriteDouble("Roll", kDefaultSensitivity);
-    w.WriteComment("Flip an axis only if your tracker reports it backwards. The sign");
-    w.WriteComment("conversion the game needs is already applied; these three ship off.");
-    w.WriteBool("InvertYaw", kDefaultInvert);
-    w.WriteBool("InvertPitch", kDefaultInvert);
-    w.WriteBool("InvertRoll", kDefaultInvert);
-}
-
-void WriteSmoothingSection(cameraunlock::IniWriter& w) {
-    w.WriteSection("Smoothing");
-    w.WriteComment("Chosen per connection from the source address; covers rotation and position.");
-    w.WriteComment("Only a loopback sender counts as local. A tracker on this PC that sends to");
-    w.WriteComment("this machine LAN address instead of 127.0.0.1 is classified as remote.");
-    w.WriteDouble("LocalSmoothing", kDefaultLocalSmoothing);
-    w.WriteDouble("RemoteSmoothing", kDefaultRemoteSmoothing);
-}
-
-void WritePositionSection(cameraunlock::IniWriter& w) {
-    w.WriteSection("Position");
-    w.WriteComment("Positional tracking. Limits are metres of head travel.");
-    w.WriteComment("The camera's collision query shortens a lean near an obstruction.");
-    w.WriteBool("Enabled", kDefaultPositionEnabled);
-    w.WriteDouble("SensitivityX", kDefaultPosSens);
-    w.WriteDouble("SensitivityY", kDefaultPosSens);
-    w.WriteDouble("SensitivityZ", kDefaultPosSens);
-    w.WriteDouble("LimitX", kDefaultPosLimitX);
-    w.WriteDouble("LimitY", kDefaultPosLimitY);
-    w.WriteDouble("LimitZ", kDefaultPosLimitZ);
-    w.WriteDouble("LimitZBack", kDefaultPosLimitZBack);
-    w.WriteComment("As above: only for a tracker that reports an axis backwards. Leaving these");
-    w.WriteComment("off is what keeps LimitZ on leaning in and LimitZBack on pulling away.");
-    w.WriteBool("InvertX", kDefaultInvert);
-    w.WriteBool("InvertY", kDefaultInvert);
-    w.WriteBool("InvertZ", kDefaultInvert);
-}
-
-void WriteGameplaySection(cameraunlock::IniWriter& w) {
-    w.WriteSection("Gameplay");
-    w.WriteComment("Hold the view still while another player is in the session, so co-op runs");
-    w.WriteComment("the stock camera. Set to 0 to keep head tracking in co-op.");
-    w.WriteBool("DisableInCoop", kDefaultDisableInCoop);
-    w.WriteComment("1: yaw about the game's reference up axis; 0: yaw about camera up.");
-    w.WriteBool("WorldSpaceYaw", kDefaultWorldSpaceYaw);
-}
-
-void WriteHotkeysSection(cameraunlock::IniWriter& w) {
-    w.WriteSection("Hotkeys");
-    w.WriteComment("Virtual-key codes. Defaults: End (toggle), Page Up (cycle tracking mode),");
-    w.WriteComment("Page Down (world/local yaw).");
-    w.WriteHex("Toggle", kDefaultVkToggle);
-    w.WriteHex("CycleMode", kDefaultVkCycleMode);
-    w.WriteHex("YawMode", kDefaultVkYawMode);
-    w.WriteComment("Ctrl+Shift+H also switches world/local yaw.");
-    w.WriteComment("Ctrl+Shift+Y (toggle) and Ctrl+Shift+G (cycle tracking mode) fire the same");
-    w.WriteComment("actions on a keyboard with no navigation cluster. They are always registered.");
-}
-
-bool WriteDefaultIni(const char* path) {
-    cameraunlock::IniWriter w;
-    if (!w.Open(path)) return false;
-    w.WriteComment("Far Cry 6 - Head Tracking configuration");
-    w.WriteComment("Lives next to tobii_gameintegration_x64.dll in the game bin folder.");
-    w.WriteBlankLine();
-    WriteGeneralSection(w);
-    w.WriteBlankLine();
-    WriteSensitivitySection(w);
-    w.WriteBlankLine();
-    WriteSmoothingSection(w);
-    w.WriteBlankLine();
-    WritePositionSection(w);
-    w.WriteBlankLine();
-    WriteGameplaySection(w);
-    w.WriteBlankLine();
-    WriteHotkeysSection(w);
-    w.Close();
-    return true;
+// A legacy action's key list: its own key where the old build bound it, then the
+// Ctrl+Shift chord it always registered beside it.
+std::string KeyList(const int* vk, char chordLetter) {
+    std::vector<KeyBinding> bindings;
+    if (vk != nullptr) bindings.push_back({KeyModifiers::kNone, *vk});
+    bindings.push_back({KeyModifiers::kCtrl | KeyModifiers::kShift, chordLetter});
+    return FormatKeyBindings(bindings);
 }
 
 }  // namespace
 
-bool Config::LoadOrCreate(const char* iniPath) {
-    if (!iniPath || !*iniPath) {
-        Log::Line("ERROR: could not resolve the directory this mod was loaded from, so "
-                  "there is nowhere to read the INI from. The mod will not start.");
-        return false;
-    }
-    if (!FileExists(iniPath) && !WriteDefaultIni(iniPath)) {
-        Log::Line("ERROR: could not create the default INI at %s. The game directory is "
-                  "not writable by this account.", iniPath);
-        return false;
+cfg::ConfigTable<Config> ConfigTable() {
+    using C = cfg::schema::Concept;
+    cfg::ConfigTable<Config> table = cfg::HeadTrackingConfigTable<Config>(
+        {C::UdpPort, C::EnableOnStartup, C::WorldSpaceYaw, C::RotationEnabled, C::LocalSmoothing,
+         C::RemoteSmoothing, C::PositionEnabled, C::PositionLimitX, C::PositionLimitY, C::PositionLimitYDown,
+         C::PositionLimitZ, C::PositionLimitZBack, C::ToggleKey, C::CycleTrackingModeKey, C::YawModeKey});
+    table.Select(C::WorldSpaceYaw).Writable()
+        .Select(C::RotationEnabled).Writable()
+        .Select(C::PositionEnabled).Writable();
+    table.Local("Gameplay", "DisableInCoop", &Config::disable_in_coop, cfg::BoolCodec(),
+                "true: head tracking holds the view still while another player is in the session,\n"
+                "so co-op runs the game's own camera.");
+    return table;
+}
+
+cfg::ImportResult MapLegacyConfig(legacy::ReadStatus status, const legacy::Config& read, Config& out) {
+    switch (status) {
+        case legacy::ReadStatus::OpenFailed:
+            return cfg::ImportResult::Refused("the file could not be opened");
+        case legacy::ReadStatus::PortRefused:
+            return cfg::ImportResult::Refused("[General] Port is not a whole number from 1024 to 65535");
+        case legacy::ReadStatus::Read:
+        case legacy::ReadStatus::Absent:
+            break;
     }
 
-    legacy::Config read;
-    const legacy::ReadStatus status = legacy::Read(iniPath, read);
-    if (status == legacy::ReadStatus::Absent) {
-        Log::Line("ERROR: Failed to open INI: %s", iniPath);
-        return false;
-    }
-    enabled_on_startup = read.enabled_on_startup;
-    udp_port = read.udp_port;
-    sens_yaw = read.sens_yaw;
-    sens_pitch = read.sens_pitch;
-    sens_roll = read.sens_roll;
-    invert_yaw = read.invert_yaw;
-    invert_pitch = read.invert_pitch;
-    invert_roll = read.invert_roll;
-    local_smoothing = read.local_smoothing;
-    remote_smoothing = read.remote_smoothing;
-    position_enabled = read.position_enabled;
-    pos_sens_x = read.pos_sens_x;
-    pos_sens_y = read.pos_sens_y;
-    pos_sens_z = read.pos_sens_z;
-    pos_limit_x = read.pos_limit_x;
-    pos_limit_y = read.pos_limit_y;
-    pos_limit_z = read.pos_limit_z;
-    pos_limit_z_back = read.pos_limit_z_back;
-    invert_pos_x = read.invert_pos_x;
-    invert_pos_y = read.invert_pos_y;
-    invert_pos_z = read.invert_pos_z;
-    disable_in_coop = read.disable_in_coop;
-    world_space_yaw = read.world_space_yaw;
-    vk_toggle = read.vk_toggle;
-    vk_cycle_mode = read.vk_cycle_mode;
-    vk_yaw_mode = read.vk_yaw_mode;
-    return status == legacy::ReadStatus::Read;
+    std::vector<cfg::DroppedValue> dropped;
+    std::vector<cfg::PoseShapingValue> shaping;
+    const auto shape = [&](auto value, auto shipped, const char* section, const char* key) {
+        cfg::LegacyPoseShaping(value, shipped, section, key, shaping, dropped);
+    };
+    shape(read.sens_yaw, legacy::kDefaultSensitivity, "Sensitivity", "Yaw");
+    shape(read.sens_pitch, legacy::kDefaultSensitivity, "Sensitivity", "Pitch");
+    shape(read.sens_roll, legacy::kDefaultSensitivity, "Sensitivity", "Roll");
+    shape(read.invert_yaw, legacy::kDefaultInvert, "Sensitivity", "InvertYaw");
+    shape(read.invert_pitch, legacy::kDefaultInvert, "Sensitivity", "InvertPitch");
+    shape(read.invert_roll, legacy::kDefaultInvert, "Sensitivity", "InvertRoll");
+    shape(read.pos_sens_x, legacy::kDefaultPosSens, "Position", "SensitivityX");
+    shape(read.pos_sens_y, legacy::kDefaultPosSens, "Position", "SensitivityY");
+    shape(read.pos_sens_z, legacy::kDefaultPosSens, "Position", "SensitivityZ");
+    shape(read.invert_pos_x, legacy::kDefaultInvert, "Position", "InvertX");
+    shape(read.invert_pos_y, legacy::kDefaultInvert, "Position", "InvertY");
+    shape(read.invert_pos_z, legacy::kDefaultInvert, "Position", "InvertZ");
+
+    out.enable_on_startup = read.enabled_on_startup;
+    out.udp_port = read.udp_port;
+    out.local_smoothing = read.local_smoothing;
+    out.position.local_smoothing = read.local_smoothing;
+    out.remote_smoothing = read.remote_smoothing;
+    out.position.remote_smoothing = read.remote_smoothing;
+
+    // [Position] Enabled chose the startup mode and nothing else: the cycle still
+    // reached every mode.
+    out.rotation_enabled = true;
+    out.position_enabled = read.position_enabled;
+    out.position.limit_x = read.pos_limit_x;
+    out.position.limit_y = read.pos_limit_y;
+    out.position.limit_y_down = read.pos_limit_y;
+    out.position.limit_z = read.pos_limit_z;
+    out.position.limit_z_back = read.pos_limit_z_back;
+
+    out.disable_in_coop = read.disable_in_coop;
+    out.world_space_yaw = read.world_space_yaw;
+
+    // The old build left a key another action already had unbound for the later
+    // action, so the list carries only its chord there.
+    out.toggle_key_name = KeyList(&read.vk_toggle, 'Y');
+    const bool cycleKeyBound = read.vk_cycle_mode != read.vk_toggle;
+    out.cycle_tracking_mode_key_name = KeyList(cycleKeyBound ? &read.vk_cycle_mode : nullptr, 'G');
+    const bool yawKeyBound = read.vk_yaw_mode != read.vk_toggle && read.vk_yaw_mode != read.vk_cycle_mode;
+    out.yaw_mode_key_name = KeyList(yawKeyBound ? &read.vk_yaw_mode : nullptr, 'H');
+
+    return status == legacy::ReadStatus::Absent ? cfg::ImportResult::Absent(std::move(dropped), std::move(shaping))
+                                                : cfg::ImportResult::Imported(std::move(dropped), std::move(shaping));
+}
+
+cfg::LegacyImport<Config> LegacyConfigImport() {
+    cfg::LegacyImport<Config> import;
+    import.run = [](const cfg::LegacyInput& input, Config& out) {
+        legacy::Config read;
+        const legacy::ReadStatus status = legacy::Read(input.ansi_path.c_str(), read);
+        return MapLegacyConfig(status, read, out);
+    };
+    import.keys = {
+        {"General", "EnableOnStartup"}, {"General", "Port"},
+        {"Sensitivity", "Yaw"},         {"Sensitivity", "Pitch"},        {"Sensitivity", "Roll"},
+        {"Sensitivity", "InvertYaw"},   {"Sensitivity", "InvertPitch"},  {"Sensitivity", "InvertRoll"},
+        {"Smoothing", "LocalSmoothing"}, {"Smoothing", "RemoteSmoothing"},
+        {"Position", "Enabled"},
+        {"Position", "SensitivityX"},   {"Position", "SensitivityY"},    {"Position", "SensitivityZ"},
+        {"Position", "LimitX"},         {"Position", "LimitY"},          {"Position", "LimitZ"},
+        {"Position", "LimitZBack"},
+        {"Position", "InvertX"},        {"Position", "InvertY"},         {"Position", "InvertZ"},
+        {"Gameplay", "WorldSpaceYaw"},  {"Gameplay", "DisableInCoop"},
+        {"Hotkeys", "Toggle"},          {"Hotkeys", "CycleMode"},        {"Hotkeys", "YawMode"},
+    };
+    return import;
+}
+
+cfg::ConfigOwnerOptions<Config> ConfigOwnerOptionsFor(const std::wstring& path) {
+    cfg::ConfigOwnerOptions<Config> options;
+    options.path = path;
+    options.table = ConfigTable();
+    options.import = LegacyConfigImport();
+    options.header.display_name = kGameDisplayName;
+    return options;
 }
 
 }  // namespace FarCry6HeadTracking

@@ -5,61 +5,10 @@
 
 #include "logging.h"
 
-#include <cmath>
-
 namespace FarCry6HeadTracking {
 
-namespace {
-
-bool AllFinite(float a, float b, float c) {
-    return std::isfinite(a) && std::isfinite(b) && std::isfinite(c);
-}
-
-// The pipeline finite-checks the wire and the INI bounds the sensitivities it
-// multiplies by, so a Config that came from a file cannot overflow the product.
-// This covers a Config built in code, which is what the overflow test drives, and
-// it is the last thing between a non-finite pose and the transformation the game
-// renders through. Drop the channel and say so once - a silently dropped pose reads
-// in game exactly like a tracker that has stopped sending.
-void ReportNonFinite(const char* channel) {
-    static bool s_warned = false;
-    if (s_warned) return;
-    s_warned = true;
-    Log::Line("WARN: the processed %s came out non-finite and is being dropped. Check "
-              "the Sensitivity and Position values in the INI: a large enough one "
-              "overflows the pose it multiplies.", channel);
-}
-
-}  // namespace
-
-void TrackingRuntime::ConfigureRotation() {
-    cameraunlock::SensitivitySettings sens;
-    sens.yaw = m_cfg.sens_yaw;
-    sens.pitch = m_cfg.sens_pitch;
-    sens.roll = m_cfg.sens_roll;
-    sens.invert_yaw = m_cfg.invert_yaw;
-    sens.invert_pitch = m_cfg.invert_pitch;
-    sens.invert_roll = m_cfg.invert_roll;
-    m_session.GetProcessor().SetSensitivity(sens);
-}
-
 void TrackingRuntime::ConfigurePosition() {
-    cameraunlock::PositionSettings pos;
-    pos.sensitivity_x = m_cfg.pos_sens_x;
-    pos.sensitivity_y = m_cfg.pos_sens_y;
-    pos.sensitivity_z = m_cfg.pos_sens_z;
-    pos.limit_x = m_cfg.pos_limit_x;
-    pos.limit_y = m_cfg.pos_limit_y;
-    // The INI exposes one vertical limit, so mirror it into the downward bound the
-    // way PositionSettings::Symmetric does. Leaving limit_y_down at its struct
-    // default would grow the upward budget only, silently.
-    pos.limit_y_down = m_cfg.pos_limit_y;
-    pos.limit_z = m_cfg.pos_limit_z;
-    pos.limit_z_back = m_cfg.pos_limit_z_back;
-    pos.invert_x = m_cfg.invert_pos_x;
-    pos.invert_y = m_cfg.invert_pos_y;
-    pos.invert_z = m_cfg.invert_pos_z;
-    m_session.SetPositionSettings(pos);
+    m_session.SetPositionSettings(m_cfg.position);
 }
 
 void TrackingRuntime::ConfigureSmoothing() {
@@ -76,21 +25,20 @@ void TrackingRuntime::ConfigureSmoothing() {
 void TrackingRuntime::Start(const Config& cfg) {
     m_cfg = cfg;
 
-    ConfigureRotation();
     ConfigurePosition();
     ConfigureSmoothing();
 
-    m_enabled.store(m_cfg.enabled_on_startup, std::memory_order_relaxed);
-    m_session.SetMode(m_cfg.position_enabled
-                          ? cameraunlock::TrackingMode::RotationAndPosition
-                          : cameraunlock::TrackingMode::RotationOnly);
+    m_enabled.store(m_cfg.enable_on_startup, std::memory_order_relaxed);
+    // The config table reads a pair that names no mode as its defaults, so the pair
+    // always decodes.
+    m_session.SetMode(cameraunlock::DecodeTrackingMode(m_cfg.rotation_enabled, m_cfg.position_enabled).value());
 
     m_receiver.SetLog([](const std::string& msg) { Log::Line("UDP: %s", msg.c_str()); });
 
-    if (m_receiver.Start(m_cfg.udp_port)) {
-        Log::Line("UDP receiver listening on port %u", m_cfg.udp_port);
+    if (m_receiver.Start(static_cast<uint16_t>(m_cfg.udp_port))) {
+        Log::Line("UDP receiver listening on port %d", m_cfg.udp_port);
     } else {
-        Log::Line("WARN: UDP receiver did not bind immediately on port %u; background "
+        Log::Line("WARN: UDP receiver did not bind immediately on port %d; background "
                   "retry active", m_cfg.udp_port);
     }
 }
@@ -107,13 +55,13 @@ void TrackingRuntime::PollConnectionState() {
     if (receiving == m_receiving) return;
     m_receiving = receiving;
     if (receiving) {
-        Log::Line("Tracker connected: pose packets are arriving on port %u",
+        Log::Line("Tracker connected: pose packets are arriving on port %d",
                   m_cfg.udp_port);
     } else {
         // What the player sees is worth saying with it: the last pose is held
         // rather than zeroed, so the view stops moving where the head last was
         // and blends on from there when packets resume.
-        Log::Line("Tracker silent: no pose packet on port %u for over %dms, so the "
+        Log::Line("Tracker silent: no pose packet on port %d for over %dms, so the "
                   "view is holding at the last head pose",
                   m_cfg.udp_port, cameraunlock::UdpReceiver::kConnectionTimeoutMs);
     }
@@ -125,8 +73,9 @@ void TrackingRuntime::ToggleEnabled() {
     Log::Line("Tracking %s", !prev ? "enabled" : "disabled");
 }
 
-void TrackingRuntime::CycleTrackingMode() {
-    switch (m_session.CycleMode()) {
+cameraunlock::TrackingMode TrackingRuntime::CycleTrackingMode() {
+    const cameraunlock::TrackingMode mode = m_session.CycleMode();
+    switch (mode) {
         case cameraunlock::TrackingMode::RotationAndPosition:
             Log::Line("Tracking mode: rotation + position (6DOF)");
             break;
@@ -137,6 +86,7 @@ void TrackingRuntime::CycleTrackingMode() {
             Log::Line("Tracking mode: position only");
             break;
     }
+    return mode;
 }
 
 FrameSample TrackingRuntime::SampleFrame() {
@@ -172,16 +122,7 @@ FrameSample TrackingRuntime::SampleFrame() {
     // rotation the player has switched off.
     out.has_rotation = m_session.IsRotationActive() &&
                        m_session.GetRotation(out.yaw, out.pitch, out.roll);
-    if (out.has_rotation && !AllFinite(out.yaw, out.pitch, out.roll)) {
-        out.has_rotation = false;
-        ReportNonFinite("head rotation");
-    }
-
     out.has_position = m_session.GetPositionOffset(out.pos_x, out.pos_y, out.pos_z);
-    if (out.has_position && !AllFinite(out.pos_x, out.pos_y, out.pos_z)) {
-        out.has_position = false;
-        ReportNonFinite("head position");
-    }
     m_lastSample = out;
     return out;
 }

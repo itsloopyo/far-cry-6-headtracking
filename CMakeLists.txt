@@ -81,6 +81,8 @@ if(FARCRY6_BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/cameraunlock-core/cpp/include
     )
+    target_compile_definitions(farcry6_tests PRIVATE
+        FARCRY6_COMMITTED_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/config/FarCry6HeadTracking.ini")
     target_link_libraries(farcry6_tests PRIVATE cameraunlock cameraunlock_hooks minhook)
     if(WIN32)
         # user32/gdi32 are what the tracker description reads the monitor through.
@@ -93,13 +95,14 @@ if(FARCRY6_BUILD_TESTS)
     endif()
     add_test(NAME farcry6_tests COMMAND farcry6_tests)
 
-    # The config differential test: v0.1.0's reader (the oracle) against the frozen
-    # reader in src/legacy_config, over every published build's first-run output and
-    # core's mutation corpus.
+    # The config differential test: v0.1.0's reader (the oracle), the frozen reader in
+    # src/legacy_config and the migration to the canonical file, over every published
+    # build's first-run output and core's mutation corpus.
     add_executable(farcry6_config_differential
         tests/config_differential/differential_tests.cpp
         tests/config_differential/oracle/oracle_config.cpp
         src/legacy_config/legacy_config.cpp
+        src/config.cpp
     )
     target_include_directories(farcry6_config_differential PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -107,7 +110,8 @@ if(FARCRY6_BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/cameraunlock-core/cpp/include
     )
     target_compile_definitions(farcry6_config_differential PRIVATE
-        FARCRY6_DIFFERENTIAL_INPUTS="${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential/inputs")
+        FARCRY6_DIFFERENTIAL_INPUTS="${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential/inputs"
+        FARCRY6_COMMITTED_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/config/FarCry6HeadTracking.ini")
     target_link_libraries(farcry6_config_differential PRIVATE cameraunlock)
     set_target_properties(farcry6_config_differential PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests")
