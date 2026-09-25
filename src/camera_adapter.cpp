@@ -448,7 +448,7 @@ bool CameraAiming() {
            GetTickCount64() - g_aimingStamp.load(std::memory_order_relaxed) <= kAimingFreshMs;
 }
 
-bool StartCameraAdapter() {
+bool StartCameraAdapter(const cameraunlock::effects::HeadFollowLightSettings& light) {
     auto* module = GetModuleHandleW(L"FC_m64d3d12.dll");
     const BuildProfile* profile = MatchRunningBuild(module);
     if (!profile) return false;
@@ -505,7 +505,7 @@ bool StartCameraAdapter() {
         return false;
     }
     Log::Line("Camera adapter active: native yaw/pitch, render roll and collision-clamped XYZ");
-    return StartReticle(g_module, o) && StartHeadlight(g_module, o);
+    return StartReticle(g_module, o) && StartHeadlight(g_module, o, light);
 }
 
 }  // namespace FarCry6HeadTracking

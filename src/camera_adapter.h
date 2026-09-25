@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include "cameraunlock/effects/head_follow_light.h"
+
 namespace FarCry6HeadTracking {
-bool StartCameraAdapter();
+bool StartCameraAdapter(const cameraunlock::effects::HeadFollowLightSettings& light);
 
 // Whether the player has a weapon's sights up, as of the last camera update.
 bool CameraAiming();

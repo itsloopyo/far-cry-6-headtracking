@@ -400,11 +400,15 @@ struct Startup {
     uint32_t limit_y_down = 0;
     uint32_t limit_z = 0;
     uint32_t limit_z_back = 0;
+    bool light_follows_head = false;
+    uint32_t light_multiplier = 0;
     std::vector<Registration> hotkeys;
 };
 
-// The frozen reader's build: [Position] Enabled chose between the first two modes, and its
-// one vertical limit bounded both directions (TrackingRuntime::ConfigurePosition at 5ea3ff9).
+// The frozen reader's build: [Position] Enabled chose between the first two modes, its one
+// vertical limit bounded both directions (TrackingRuntime::ConfigurePosition at 5ea3ff9), and
+// the flashlight always followed the head at kHeadlightHeadScale = 1.5f (src/headlight.cpp at
+// 5ea3ff9), which no setting reached.
 Startup FromImport(const legacy::Config& c) {
     Startup s;
     s.port = c.udp_port;
@@ -419,6 +423,8 @@ Startup FromImport(const legacy::Config& c) {
     s.limit_y_down = Bits(c.pos_limit_y);
     s.limit_z = Bits(c.pos_limit_z);
     s.limit_z_back = Bits(c.pos_limit_z_back);
+    s.light_follows_head = true;
+    s.light_multiplier = Bits(1.5f);
     s.hotkeys = ImportHotkeys(c);
     return s;
 }
@@ -432,8 +438,8 @@ Action ActionOf(FarCry6HeadTracking::HotkeyAction a) {
     throw std::logic_error("hotkey action");
 }
 
-// This build: TrackingRuntime::Start, and the lists StartHotkeys registers, which
-// HotkeyLists gives it.
+// This build: TrackingRuntime::Start, StartHeadlight, and the lists StartHotkeys registers,
+// which HotkeyLists gives it.
 Startup FromMigration(const Config& c) {
     Startup s;
     s.port = c.udp_port;
@@ -448,6 +454,8 @@ Startup FromMigration(const Config& c) {
     s.limit_y_down = Bits(c.position.limit_y_down);
     s.limit_z = Bits(c.position.limit_z);
     s.limit_z_back = Bits(c.position.limit_z_back);
+    s.light_follows_head = c.light.follows_head;
+    s.light_multiplier = Bits(c.light.multiplier);
     for (const FarCry6HeadTracking::HotkeyList& list : FarCry6HeadTracking::HotkeyLists(c)) {
         for (const cameraunlock::input::KeyBinding& b : list.bindings) {
             s.hotkeys.push_back({ActionOf(list.action), b.vk, static_cast<unsigned>(b.modifiers)});
@@ -473,6 +481,8 @@ std::vector<std::string> StartupDifferences(const Startup& a, const Startup& b) 
     SAME(limit_y_down);
     SAME(limit_z);
     SAME(limit_z_back);
+    SAME(light_follows_head);
+    SAME(light_multiplier);
 #undef SAME
     if (a.hotkeys != b.hotkeys) out.push_back("hotkeys " + Describe(a.hotkeys) + " against " + Describe(b.hotkeys));
     return out;

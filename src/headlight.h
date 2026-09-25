@@ -5,13 +5,16 @@
 
 #include "build_profile.h"
 
+#include "cameraunlock/effects/head_follow_light.h"
 #include "cameraunlock/math/quat4.h"
 
 #include <cstdint>
 
 namespace FarCry6HeadTracking {
 
-bool StartHeadlight(uintptr_t module, const Offsets& offsets);
+// Installs nothing when light.follows_head is false, so the beam stays on the aim.
+bool StartHeadlight(uintptr_t module, const Offsets& offsets,
+                    const cameraunlock::effects::HeadFollowLightSettings& light);
 
 // The extended view's clean aim and the tracked view the game renders, both world
 // rotations. Their difference is the head turn the beam follows.

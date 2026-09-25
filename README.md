@@ -171,6 +171,20 @@ sights still lined up, and your rounds land where those sights point. Head
 movement is scaled to the zoom, so a scope does not magnify it. Leaning eases out
 while the sights are up, because it would move your eye off them.
 
+### Flashlight
+
+Your flashlight follows your head rather than your aim, and turns a little
+further than the view does. When you turn your head your eyes end up past the
+centre of the screen, so a beam matched to the view alone lands short of what
+you are looking at.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `LightFollowsHead` | `true` | Point the light where you are looking |
+| `LightMultiplier` | `1.5` | How far it turns relative to your head. `1.0` matches the view, `0` leaves the beam on the aim |
+
+Both are in the `[Light]` section of the settings file.
+
 ## Configuration
 
 The mod reads its settings when the game starts. Apart from creating or converting the
@@ -242,6 +256,13 @@ ToggleKey=End, Ctrl+Shift+Y
 CycleTrackingModeKey=PageUp, Ctrl+Shift+G
 ; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
 YawModeKey=PageDown, Ctrl+Shift+H
+
+[Light]
+; true: a light you carry points where you look instead of where you aim.
+LightFollowsHead=true
+; How far the light turns for each degree your head turns.
+; 1 matches the view, 0 keeps the light on your aim.
+LightMultiplier=1.5
 
 [Gameplay]
 ; true: head tracking holds the view still while another player is in the session,

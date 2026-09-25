@@ -167,7 +167,7 @@ bool Mod::EnsureStarted() {
     if (!LoadConfiguration()) {
         return false;
     }
-    if (!StartCameraAdapter()) {
+    if (!StartCameraAdapter(m_cfg.light)) {
         return false;
     }
     StartSubsystems();

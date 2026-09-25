@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `LightFollowsHead` and `LightMultiplier` in the `[Light]` section of `FarCry6HeadTracking.ini`. v0.1.0 already turned the flashlight with your head, 1.5 times as far as the head turn, with no setting for it. Both default to exactly that, so the beam behaves as before until you change them. `LightFollowsHead=false` leaves the beam on your aim. `LightMultiplier` sets how far the beam turns: `1.0` matches the view, `0` leaves the beam on the aim, and the largest value it takes is `5`.
+
 ### Changed
 
 - `FarCry6HeadTracking.ini` has a new layout. The first time this version starts, it converts the file once into the new layout and keeps the file as it was beside it as `FarCry6HeadTracking.ini.pre-canonical`. `FarCry6HeadTracking.ini.pre-canonical.last`, when present, is the file as it was before the most recent conversion: the mod converts the file again when it finds the older layout later, for example after an older version of the mod rewrote it.

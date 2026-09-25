@@ -4,6 +4,7 @@
 #include "headlight.h"
 #include "logging.h"
 
+#include "cameraunlock/effects/head_follow_light.h"
 #include "cameraunlock/hooks/hook_manager.h"
 
 #include <windows.h>
@@ -21,8 +22,6 @@ using cameraunlock::hooks::HookStatus;
 using cameraunlock::math::Quat4;
 using cameraunlock::math::Vec3;
 
-// The beam leads the view: it turns through this multiple of the head's yaw and pitch.
-constexpr float kHeadlightHeadScale = 1.5f;
 constexpr ULONGLONG kHeadDeltaFreshMs = 200;
 
 using SpawnFn = void (*)(void*);
@@ -35,6 +34,9 @@ SetWorldMatrixFn g_setWorldMatrix = nullptr;
 // The flashlight component, seen when the game spawns its light. Cleared by the
 // component's own destructor, so SetWorldMatrix never follows a freed pointer.
 std::atomic<uint8_t*> g_component{nullptr};
+
+// Set once, before the hooks that read it are installed.
+float g_multiplier = cameraunlock::effects::kDefaultLightMultiplier;
 
 std::mutex g_deltaMutex;
 Quat4 g_delta;
@@ -52,7 +54,7 @@ Quat4 ScaleAngle(Quat4 q, float scale) {
     const float half = std::acos(std::fmin(q.w, 1.0f));
     const float s = std::sin(half);
     if (s < 1e-6f) return Quat4::Identity();
-    const float scaled = half * scale;
+    const float scaled = cameraunlock::effects::ScaleHeadAngle(2.0f * half, scale) * 0.5f;
     const float k = std::sin(scaled) / s;
     return Quat4(q.x * k, q.y * k, q.z * k, std::cos(scaled));
 }
@@ -86,7 +88,7 @@ void HookedSetWorldMatrix(void* entity, const float* matrix, void* extra) {
         }
         delta = g_delta;
     }
-    const Quat4 turn = ScaleAngle(delta, kHeadlightHeadScale);
+    const Quat4 turn = ScaleAngle(delta, g_multiplier);
     float turned[16];
     std::memcpy(turned, matrix, sizeof(turned));
     for (int row = 0; row < 3; ++row) {
@@ -136,7 +138,13 @@ void NoteHeadDelta(const Quat4& clean, const Quat4& tracked) {
     g_deltaStamp = GetTickCount64();
 }
 
-bool StartHeadlight(uintptr_t module, const Offsets& offsets) {
+bool StartHeadlight(uintptr_t module, const Offsets& offsets,
+                    const cameraunlock::effects::HeadFollowLightSettings& light) {
+    if (!light.follows_head) {
+        Log::Line("Headlight: LightFollowsHead is off; the flashlight beam stays on the aim");
+        return true;
+    }
+    g_multiplier = light.multiplier;
     // Destroy first: once the spawn hook can record a component, its destructor must
     // already be able to clear it.
     if (!Hook(module, offsets.flashlight_destroy, reinterpret_cast<void*>(&HookedDestroy),
@@ -147,8 +155,7 @@ bool StartHeadlight(uintptr_t module, const Offsets& offsets) {
               reinterpret_cast<void**>(&g_setWorldMatrix), "transform")) {
         return false;
     }
-    Log::Line("Headlight: the flashlight beam follows head yaw and pitch at %.1fx",
-              kHeadlightHeadScale);
+    Log::Line("Headlight: the flashlight beam follows head yaw and pitch at %.2fx", g_multiplier);
     return true;
 }
 
