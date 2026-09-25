@@ -40,16 +40,9 @@ jobs:
         with:
           run-install: false
 
-      - name: Run unit tests
-        shell: pwsh
-        run: |
-          pixi run test
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::pixi run test failed"
-            exit 1
-          }
-
-      - name: Build and package
+      # package depends on test, so this runs the unit tests and the config
+      # differential test too.
+      - name: Build, test and package
         shell: pwsh
         run: |
           pixi run package

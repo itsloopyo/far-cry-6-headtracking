@@ -68,4 +68,7 @@ clean = { cmd = """
 """ }
 
 [dependencies]
-# None - the build uses the system CMake and Visual Studio.
+# CMake and Visual Studio come from the system. Node runs the canonical config lint in
+# `test`, which `package` depends on, pinned to the release cameraunlock-core's own lock
+# resolves.
+nodejs = "==26.5.0"
