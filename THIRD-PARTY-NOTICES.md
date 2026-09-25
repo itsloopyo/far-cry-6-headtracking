@@ -10,7 +10,7 @@ repository alone.
 
 ## cameraunlock-core
 
-- **Version:** commit `2eded2c129ae256564dab23652bc6732eb47d8a9`
+- **Version:** commit `befb88eef8bf0c8238d49b1e4d709578052d5590`
 - **License:** `MIT`
 - **Upstream:** https://github.com/itsloopyo/cameraunlock-core
 - **Usage:** Provides the OpenTrack receiver, the pose interpolation and smoothing
