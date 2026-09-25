@@ -32,7 +32,7 @@ set "SHIM_MARKER=Far Cry 6 - Head Tracking configuration"
 :: every update and then records the tuned file as the game original.
 set "MOD_SEED_FILES="
 :: Post-install help text. `&echo ` starts each further line.
-set "MOD_CONTROLS=Controls:&echo   End              - Toggle head tracking on/off&echo   Page Up          - Cycle tracking mode&echo   Ctrl+Shift+Y     - Toggle head tracking (chord alternative)&echo   Ctrl+Shift+G     - Cycle tracking mode (chord alternative)"
+set "MOD_CONTROLS=Controls:&echo   End              - Toggle head tracking on/off&echo   Page Up          - Cycle tracking mode&echo   Page Down        - Switch world/local yaw&echo   Ctrl+Shift+Y     - Toggle head tracking (chord alternative)&echo   Ctrl+Shift+G     - Cycle tracking mode (chord alternative)&echo   Ctrl+Shift+H     - Switch world/local yaw (chord alternative)"
 :: Not used by this mod. Set blank so a value another mod's wrapper left in
 :: the same console does not reach the body.
 set "SHIM_MARKER_ALT="
