@@ -26,12 +26,14 @@
 // shipped a config file or a launcher seed.
 
 #include "config.h"
+#include "hotkey_bindings.h"
 #include "legacy_config/legacy_config.h"
 #include "oracle/oracle_config.h"
 
 #include "cameraunlock/config/config_owner.h"
 #include "cameraunlock/config/legacy_import.h"
 #include "cameraunlock/config/testing/ini_mutations.h"
+#include "cameraunlock/input/key_binding_registration.h"
 #include "cameraunlock/input/key_bindings.h"
 #include "cameraunlock/tracking/tracking_mode.h"
 
@@ -421,15 +423,17 @@ Startup FromImport(const legacy::Config& c) {
     return s;
 }
 
-void AddKeyList(std::vector<Registration>& regs, Action action, const std::string& list) {
-    const cameraunlock::input::KeyBindingsParseResult parsed = cameraunlock::input::ParseKeyBindings(list);
-    if (!parsed.ok()) throw std::logic_error("'" + list + "' is not a key list: " + parsed.error);
-    for (const cameraunlock::input::KeyBinding& b : parsed.bindings) {
-        regs.push_back({action, b.vk, static_cast<unsigned>(b.modifiers)});
+Action ActionOf(FarCry6HeadTracking::HotkeyAction a) {
+    switch (a) {
+        case FarCry6HeadTracking::HotkeyAction::Toggle: return Action::Toggle;
+        case FarCry6HeadTracking::HotkeyAction::CycleTrackingMode: return Action::CycleMode;
+        case FarCry6HeadTracking::HotkeyAction::YawMode: return Action::YawMode;
     }
+    throw std::logic_error("hotkey action");
 }
 
-// This build: TrackingRuntime::Start and StartHotkeys.
+// This build: TrackingRuntime::Start, and the lists StartHotkeys registers, which
+// HotkeyLists gives it.
 Startup FromMigration(const Config& c) {
     Startup s;
     s.port = c.udp_port;
@@ -444,9 +448,11 @@ Startup FromMigration(const Config& c) {
     s.limit_y_down = Bits(c.position.limit_y_down);
     s.limit_z = Bits(c.position.limit_z);
     s.limit_z_back = Bits(c.position.limit_z_back);
-    AddKeyList(s.hotkeys, Action::Toggle, c.toggle_key_name);
-    AddKeyList(s.hotkeys, Action::CycleMode, c.cycle_tracking_mode_key_name);
-    AddKeyList(s.hotkeys, Action::YawMode, c.yaw_mode_key_name);
+    for (const FarCry6HeadTracking::HotkeyList& list : FarCry6HeadTracking::HotkeyLists(c)) {
+        for (const cameraunlock::input::KeyBinding& b : list.bindings) {
+            s.hotkeys.push_back({ActionOf(list.action), b.vk, static_cast<unsigned>(b.modifiers)});
+        }
+    }
     std::sort(s.hotkeys.begin(), s.hotkeys.end());
     return s;
 }
@@ -639,6 +645,24 @@ std::string Replaced(std::string base, const std::string& from, const std::strin
     return base.replace(at, from.size(), to);
 }
 
+// Registration compares the two builds by key and modifiers, which holds only while a binding
+// with no modifiers fires as the old build's NavGuarded did (not while Ctrl and Shift are both
+// held) and a Ctrl+Shift binding as its ChordGuarded did (while both are held). Alt changes
+// neither.
+void TestRegistrationModel() {
+    using cameraunlock::input::detail::BindingFires;
+    for (unsigned held = 0; held < 8; ++held) {
+        const auto mods = static_cast<KeyModifiers>(held);
+        const bool chordHeld = cameraunlock::input::HasModifiers(mods, KeyModifiers::kCtrl | KeyModifiers::kShift);
+        if (BindingFires(KeyModifiers::kNone, mods) != !chordHeld) {
+            Fail("registration", "a key with no modifiers does not fire as NavGuarded did, held " + std::to_string(held));
+        }
+        if (BindingFires(KeyModifiers::kCtrl | KeyModifiers::kShift, mods) != chordHeld) {
+            Fail("registration", "a Ctrl+Shift key does not fire as ChordGuarded did, held " + std::to_string(held));
+        }
+    }
+}
+
 void TestFrozenDefaults() {
     const oracle::Config o;
     const legacy::Config l;
@@ -662,6 +686,7 @@ int main() {
         tally.committed = ReadBytes(Widen(FARCRY6_COMMITTED_CONFIG));
 
         TestFrozenDefaults();
+        TestRegistrationModel();
 
         const std::string firstRunDev = ReadInput("first-run-dec1791.ini");
         const std::string firstRun = ReadInput("first-run-v0.1.0.ini");

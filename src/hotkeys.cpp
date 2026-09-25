@@ -3,17 +3,16 @@
 
 #include "hotkeys.h"
 
+#include "hotkey_bindings.h"
 #include "logging.h"
 #include "mod.h"
 
 #include "cameraunlock/input/hotkey_poller.h"
 #include "cameraunlock/input/key_binding_registration.h"
-#include "cameraunlock/input/key_bindings.h"
 
 #include <exception>
 #include <functional>
 #include <stdexcept>
-#include <string>
 
 namespace FarCry6HeadTracking {
 
@@ -26,15 +25,13 @@ constexpr int kPollIntervalMs = 16;
 cameraunlock::input::HotkeyPoller g_poller;
 bool g_started = false;
 
-// A plain key does not fire while Ctrl and Shift are both held, so Ctrl+Shift with
-// that key reaches only a binding that names the chord.
-void Register(const std::string& keys, const char* setting, std::function<void()> action) {
-    const cameraunlock::input::KeyBindingsParseResult parsed = cameraunlock::input::ParseKeyBindings(keys);
-    if (!parsed.ok()) {
-        // The config table read the list with the same parser, so this is a bug.
-        throw std::logic_error(std::string(setting) + "=" + keys + " is not a key list: " + parsed.error);
+std::function<void()> ActionFor(HotkeyAction action) {
+    switch (action) {
+        case HotkeyAction::Toggle: return []() { Mod::Instance().Runtime().ToggleEnabled(); };
+        case HotkeyAction::CycleTrackingMode: return []() { Mod::Instance().CycleTrackingMode(); };
+        case HotkeyAction::YawMode: return []() { Mod::Instance().ToggleYawMode(); };
     }
-    cameraunlock::input::RegisterKeyBindings(g_poller, parsed.bindings, std::move(action));
+    throw std::logic_error("unknown hotkey action");
 }
 
 }  // namespace
@@ -42,10 +39,11 @@ void Register(const std::string& keys, const char* setting, std::function<void()
 void StartHotkeys(const Config& cfg) {
     if (g_started) return;
 
-    Register(cfg.toggle_key_name, "ToggleKey", []() { Mod::Instance().Runtime().ToggleEnabled(); });
-    Register(cfg.cycle_tracking_mode_key_name, "CycleTrackingModeKey",
-             []() { Mod::Instance().CycleTrackingMode(); });
-    Register(cfg.yaw_mode_key_name, "YawModeKey", []() { Mod::Instance().ToggleYawMode(); });
+    // A plain key does not fire while Ctrl and Shift are both held, so Ctrl+Shift with
+    // that key reaches only a binding that names the chord.
+    for (const HotkeyList& list : HotkeyLists(cfg)) {
+        cameraunlock::input::RegisterKeyBindings(g_poller, list.bindings, ActionFor(list.action));
+    }
 
     // The poller rethrows std::system_error when the process cannot spawn its
     // thread, deliberately, so the failure is not silent. Catch it here: this runs

@@ -34,6 +34,7 @@ add_library(FarCry6HeadTracking SHARED
     src/legacy_config/legacy_config.cpp
     src/mod.cpp
     src/hotkeys.cpp
+    src/hotkey_bindings.cpp
     src/tracking_runtime.cpp
     src/frame_pump.cpp
     src/tobii_shim.cpp
@@ -103,6 +104,7 @@ if(FARCRY6_BUILD_TESTS)
         tests/config_differential/oracle/oracle_config.cpp
         src/legacy_config/legacy_config.cpp
         src/config.cpp
+        src/hotkey_bindings.cpp
     )
     target_include_directories(farcry6_config_differential PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
