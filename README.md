@@ -168,8 +168,9 @@ included, and every item in a list can be changed or removed:
 Head tracking stays on while you aim. The weapon stays where your mouse or
 controller points it, so with your head turned it sits off to one side with its
 sights still lined up, and your rounds land where those sights point. Head
-movement is scaled to the zoom, so a scope does not magnify it. Leaning eases out
-while the sights are up, because it would move your eye off them.
+movement is scaled to the zoom of iron sights, so aiming down them does not
+magnify it. Scopes have not been tested. Leaning eases out while the sights are
+up, because it would move your eye off them.
 
 ### Flashlight
 
