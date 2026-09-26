@@ -406,13 +406,18 @@ struct Startup {
     uint32_t limit_z_back = 0;
     bool light_follows_head = false;
     uint32_t light_multiplier = 0;
+    bool collision_enabled = false;
+    uint32_t collision_margin = 0;
+    uint32_t collision_release_smoothing = 0;
+    int collision_mask = 0;
     std::vector<Registration> hotkeys;
 };
 
 // The frozen reader's build: [Position] Enabled chose between the first two modes, its one
 // vertical limit bounded both directions (TrackingRuntime::ConfigurePosition at 5ea3ff9), and
 // the flashlight always followed the head at kHeadlightHeadScale = 1.5f (src/headlight.cpp at
-// 5ea3ff9), which no setting reached.
+// 5ea3ff9), and the lean's wall check always ran with a 0.10 margin, 0.9 release smoothing and
+// the 0x2dbf layer mask (src/camera_adapter.cpp at v0.1.0 and 5ea3ff9). No setting reached either.
 Startup FromImport(const legacy::Config& c) {
     Startup s;
     s.port = c.udp_port;
@@ -429,6 +434,10 @@ Startup FromImport(const legacy::Config& c) {
     s.limit_z_back = Bits(c.pos_limit_z_back);
     s.light_follows_head = true;
     s.light_multiplier = Bits(1.5f);
+    s.collision_enabled = true;
+    s.collision_margin = Bits(0.10f);
+    s.collision_release_smoothing = Bits(0.9f);
+    s.collision_mask = 0x2dbf;
     s.hotkeys = ImportHotkeys(c);
     return s;
 }
@@ -460,6 +469,10 @@ Startup FromMigration(const Config& c) {
     s.limit_z_back = Bits(c.position.limit_z_back);
     s.light_follows_head = c.light.follows_head;
     s.light_multiplier = Bits(c.light.multiplier);
+    s.collision_enabled = c.collision_enabled;
+    s.collision_margin = Bits(c.lean_clamp.skin);
+    s.collision_release_smoothing = Bits(c.lean_clamp.release_smoothing);
+    s.collision_mask = c.collision_channel;
     for (const FarCry6HeadTracking::HotkeyList& list : FarCry6HeadTracking::HotkeyLists(c)) {
         for (const cameraunlock::input::KeyBinding& b : list.bindings) {
             s.hotkeys.push_back({ActionOf(list.action), b.vk, static_cast<unsigned>(b.modifiers)});
@@ -487,6 +500,10 @@ std::vector<std::string> StartupDifferences(const Startup& a, const Startup& b) 
     SAME(limit_z_back);
     SAME(light_follows_head);
     SAME(light_multiplier);
+    SAME(collision_enabled);
+    SAME(collision_margin);
+    SAME(collision_release_smoothing);
+    SAME(collision_mask);
 #undef SAME
     if (a.hotkeys != b.hotkeys) out.push_back("hotkeys " + Describe(a.hotkeys) + " against " + Describe(b.hotkeys));
     return out;
@@ -572,7 +589,8 @@ const char kEditedDefaults[] =
     "[General]\r\nEnableOnStartup=false\r\nWorldSpaceYaw=false\r\nRotationEnabled=true\r\n\r\n"
     "[Smoothing]\r\nLocalSmoothing=0.5\r\nRemoteSmoothing=0.4\r\n\r\n"
     "[Position]\r\nPositionEnabled=false\r\nPositionLimitX=0.5\r\nPositionLimitY=0.25\r\n"
-    "PositionLimitYDown=0.15\r\nPositionLimitZ=0.3\r\nPositionLimitZBack=0.05\r\n\r\n"
+    "PositionLimitYDown=0.15\r\nPositionLimitZ=0.3\r\nPositionLimitZBack=0.05\r\n"
+    "CollisionEnabled=false\r\nCollisionReleaseSmoothing=0.5\r\n\r\n"
     "[Hotkeys]\r\nToggleKey=F8\r\nCycleTrackingModeKey=F9\r\nYawModeKey=F10\r\n\r\n"
     "[Light]\r\nLightFollowsHead=false\r\nLightMultiplier=1.0\r\n";
 
@@ -803,7 +821,7 @@ int main() {
                 c.position.limit_x != 0.5f || c.position.limit_y != 0.25f || c.position.limit_y_down != 0.15f ||
                 c.position.limit_z != 0.3f || c.position.limit_z_back != 0.05f || c.toggle_key_name != "F8" ||
                 c.cycle_tracking_mode_key_name != "F9" || c.yaw_mode_key_name != "F10" || c.light.follows_head ||
-                c.light.multiplier != 1.0f) {
+                c.light.multiplier != 1.0f || c.collision_enabled || c.lean_clamp.release_smoothing != 0.5f) {
                 Fail("Defaults.ini", "the edited Defaults.ini does not reach every row it names");
             }
         }

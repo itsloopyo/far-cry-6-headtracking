@@ -37,8 +37,14 @@ cfg::ConfigTable<Config> ConfigTable() {
     cfg::ConfigTable<Config> table = cfg::HeadTrackingConfigTable<Config>(
         {C::UdpPort, C::EnableOnStartup, C::WorldSpaceYaw, C::RotationEnabled, C::LocalSmoothing,
          C::RemoteSmoothing, C::PositionEnabled, C::PositionLimitX, C::PositionLimitY, C::PositionLimitYDown,
-         C::PositionLimitZ, C::PositionLimitZBack, C::ToggleKey, C::CycleTrackingModeKey, C::YawModeKey,
-         C::LightFollowsHead, C::LightMultiplier});
+         C::PositionLimitZ, C::PositionLimitZBack, C::CollisionEnabled, C::CollisionMargin, C::CollisionChannel,
+         C::CollisionReleaseSmoothing, C::ToggleKey, C::CycleTrackingModeKey, C::YawModeKey, C::LightFollowsHead,
+         C::LightMultiplier});
+    table.Select(C::CollisionMargin)
+        .Comment("How far, in metres, the view is held off a wall when you lean into it.\n"
+                 "The mod holds it at least 0.05 metres past the camera's near clip distance.")
+        .Select(C::CollisionChannel)
+        .Comment("The game's collision layers the wall check tests against, as a bit mask written in decimal.");
     table.Select(C::WorldSpaceYaw).Writable()
         .Select(C::RotationEnabled).Writable()
         .Select(C::PositionEnabled).Writable();
@@ -96,6 +102,12 @@ cfg::ImportResult MapLegacyConfig(legacy::ReadStatus status, const legacy::Confi
 
     out.disable_in_coop = read.disable_in_coop;
     out.world_space_yaw = read.world_space_yaw;
+
+    // No key reached the lean's wall check: it always ran, on these values.
+    out.collision_enabled = true;
+    out.lean_clamp.skin = 0.10f;
+    out.lean_clamp.release_smoothing = 0.9f;
+    out.collision_channel = kCollisionLayerMask;
 
     // The old build left a key another action already had unbound for the later
     // action, so the list carries only its chord there.

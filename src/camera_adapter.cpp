@@ -28,6 +28,7 @@ namespace FarCry6HeadTracking {
 namespace {
 
 using cameraunlock::camera::LeanClamp;
+using cameraunlock::camera::LeanClampSettings;
 using cameraunlock::camera::LeanObstruction;
 using cameraunlock::hooks::HookManager;
 using cameraunlock::hooks::HookStatus;
@@ -44,6 +45,11 @@ SetAnglesFn g_setAngles = nullptr;
 RenderFn g_render = nullptr;
 uintptr_t g_module = 0;
 const Offsets* g_offsets = nullptr;
+
+// Set once from the settings before the hooks go in, and read-only after.
+bool g_collisionEnabled = false;
+LeanClampSettings g_leanClamp;
+uint32_t g_collisionMask = 0;
 
 struct UpdateContext {
     void* camera = nullptr;
@@ -106,13 +112,14 @@ struct QueryHits {
 struct QueryContext {
     void* world;
     void* ignored_collider;
+    uint32_t mask;
 };
 
 LeanObstruction QueryLean(void* context, const Vec3& start,
                          const Vec3& direction, float distance) {
     const auto& query = *static_cast<QueryContext*>(context);
     QueryFilter filter{};
-    Native<void (*)(QueryFilter*, uint32_t, uint32_t)>(g_offsets->query_filter_construct)(&filter, 0x2dbf, 0);
+    Native<void (*)(QueryFilter*, uint32_t, uint32_t)>(g_offsets->query_filter_construct)(&filter, query.mask, 0);
     QueryHits hits;
     const Vec3 segment = direction * distance;
     Native<void (*)(void*, const Vec3*, const Vec3*, QueryHits*, const QueryFilter*,
@@ -138,7 +145,7 @@ LeanObstruction QueryLean(void* context, const Vec3& start,
 float AimDistance(const QueryContext& query, const Vec3& start, const Vec3& direction,
                   float reach) {
     QueryFilter filter{};
-    Native<void (*)(QueryFilter*, uint32_t, uint32_t)>(g_offsets->query_filter_construct)(&filter, 0x2dbf, 0);
+    Native<void (*)(QueryFilter*, uint32_t, uint32_t)>(g_offsets->query_filter_construct)(&filter, query.mask, 0);
     QueryHits hits;
     const Vec3 segment = direction * reach;
     Native<void (*)(void*, const Vec3*, const Vec3*, QueryHits*, const QueryFilter*,
@@ -311,11 +318,13 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
         }
         float nearPlane;
         std::memcpy(&nearPlane, camera->settings + 4, sizeof(nearPlane));
-        clamp.SetSettings({std::max(0.10f, nearPlane + 0.05f), 0.9f});
         void* world = *reinterpret_cast<void**>(g_module + g_offsets->world);
-        if (world) {
+        if (!g_collisionEnabled) {
+            next.offset = CameraLean(yawCamera, next.pose.position);
+        } else if (world) {
+            clamp.SetSettings({std::max(g_leanClamp.skin, nearPlane + 0.05f), g_leanClamp.release_smoothing});
             // The world query requires the camera-update thread; rendering may run on a worker.
-            QueryContext context{world, ignoredCollider};
+            QueryContext context{world, ignoredCollider, g_collisionMask};
             next.offset = clamp.Apply(camera->eye, CameraLean(yawCamera, next.pose.position),
                                       g_updateContext.dt, QueryLean, &context);
         } else {
@@ -328,7 +337,7 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
             constexpr float kReach = 500.0f;
             const Quat4 delta = g_updateContext.tracked_view * g_updateContext.clean_view.Inverse();
             const Vec3 aim = delta.Inverse().Rotate(camera->forward);
-            QueryContext context{world, ignoredCollider};
+            QueryContext context{world, ignoredCollider, static_cast<uint32_t>(kCollisionLayerMask)};
             const float distance = AimDistance(context, camera->eye, aim, kReach);
             const Vec3 impact = camera->eye + aim * distance;
             CameraParameters nativeRolled = *camera;
@@ -448,7 +457,17 @@ bool CameraAiming() {
            GetTickCount64() - g_aimingStamp.load(std::memory_order_relaxed) <= kAimingFreshMs;
 }
 
-bool StartCameraAdapter(const cameraunlock::effects::HeadFollowLightSettings& light) {
+bool StartCameraAdapter(const Config& config) {
+    g_collisionEnabled = config.collision_enabled;
+    g_leanClamp = config.lean_clamp;
+    // Passed through as written: which layers block is the game's to say.
+    g_collisionMask = static_cast<uint32_t>(config.collision_channel);
+    if (g_collisionEnabled) {
+        Log::Line("Lean collision: on, margin %.3f m, release smoothing %.2f, layer mask 0x%X",
+                  g_leanClamp.skin, g_leanClamp.release_smoothing, g_collisionMask);
+    } else {
+        Log::Line("Lean collision: off (CollisionEnabled=false), so leaning can move the view through walls");
+    }
     auto* module = GetModuleHandleW(L"FC_m64d3d12.dll");
     const BuildProfile* profile = MatchRunningBuild(module);
     if (!profile) return false;
@@ -504,8 +523,9 @@ bool StartCameraAdapter(const cameraunlock::effects::HeadFollowLightSettings& li
         }
         return false;
     }
-    Log::Line("Camera adapter active: native yaw/pitch, render roll and collision-clamped XYZ");
-    return StartReticle(g_module, o) && StartHeadlight(g_module, o, light);
+    Log::Line("Camera adapter active: native yaw/pitch, render roll and %s XYZ",
+              g_collisionEnabled ? "collision-clamped" : "unclamped");
+    return StartReticle(g_module, o) && StartHeadlight(g_module, o, config.light);
 }
 
 }  // namespace FarCry6HeadTracking

@@ -230,6 +230,8 @@ The built-in value of each setting set to `default` below:
 - `PositionLimitYDown=0.2`
 - `PositionLimitZ=0.4`
 - `PositionLimitZBack=0.1`
+- `CollisionEnabled=true`
+- `CollisionReleaseSmoothing=0.9`
 - `ToggleKey=End, Ctrl+Shift+Y`
 - `CycleTrackingModeKey=PageUp, Ctrl+Shift+G`
 - `YawModeKey=PageDown, Ctrl+Shift+H`
@@ -287,6 +289,16 @@ PositionLimitYDown=default
 PositionLimitZ=default
 ; How far, in metres, leaning back can move the view.
 PositionLimitZBack=default
+; true: leaning stops at walls instead of moving the view through them.
+CollisionEnabled=default
+; How far, in metres, the view is held off a wall when you lean into it.
+; The mod holds it at least 0.05 metres past the camera's near clip distance.
+; CollisionMargin=0.1
+; The game's collision layers the wall check tests against, as a bit mask written in decimal.
+; CollisionChannel=11711
+; How gently the view eases back out after a wall stopped a lean.
+; 0 is the quickest, 1 the slowest.
+CollisionReleaseSmoothing=default
 
 [Hotkeys]
 ; Turns head tracking on and off.
@@ -389,7 +401,9 @@ every 600 frames carrying the pose being handed to the game.
   log records the build's fingerprint and whether it is newer or older than the
   builds the mod knows.
 - **Lean is limited by nearby geometry.** The mod uses the game's collision query
-  to keep the eye back from an obstruction.
+  to keep the eye back from an obstruction. `CollisionEnabled=false` in
+  `CameraUnlock.ini` turns this off, and `CollisionReleaseSmoothing` sets how
+  gently the view eases back out once the wall is gone.
 - **The mod replaces a file the game ships.** A game update, or verifying the files
   in Steam or Ubisoft Connect, restores the original. Run the installer again.
 - **A real Tobii eye tracker will not work while the mod is installed**, because the

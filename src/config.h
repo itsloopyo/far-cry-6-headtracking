@@ -30,7 +30,13 @@ constexpr wchar_t kConfigFileName[] = L"CameraUnlock.ini";
 // still reads it after a rollback.
 constexpr wchar_t kLegacyConfigFileName[] = L"FarCry6HeadTracking.ini";
 
+// The collision layers the game's query filter takes: the reticle's ray always tests these,
+// and the lean's wall check does unless CollisionChannel says otherwise.
+constexpr int kCollisionLayerMask = 0x2dbf;
+
 struct Config : cameraunlock::HeadTrackingConfig {
+    Config() { collision_channel = kCollisionLayerMask; }
+
     // The game's co-op sessions leave the view under the mod's control the same way a
     // solo session does, and nothing about head tracking changes where a shot lands.
     // It is still switched off there by default so a session shared with another
