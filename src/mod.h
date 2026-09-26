@@ -59,9 +59,9 @@ public:
 private:
     Mod() = default;
 
-    // Reads the settings file beside this DLL, converting a pre-canonical one, and logs
-    // what it found. False means the mod cannot start at all, which is a state the shim
-    // still answers the game from.
+    // Reads CameraUnlock.ini beside this DLL, importing FarCry6HeadTracking.ini into it
+    // when it is absent, and logs what it found. False means the mod cannot start at all,
+    // which is a state the shim still answers the game from.
     bool LoadConfiguration();
 
     void Save(const std::function<void(Config&)>& change);

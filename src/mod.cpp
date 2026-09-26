@@ -85,7 +85,7 @@ bool Mod::LoadConfiguration() {
         return false;
     }
     const std::wstring path = dir + L"\\" + kConfigFileName;
-    m_owner.emplace(ConfigOwnerOptionsFor(path));
+    m_owner.emplace(ConfigOwnerOptionsFor(dir, cameraunlock::config::DefaultsFile::PerUser()));
     cameraunlock::config::ConfigLoadResult<Config> loaded = m_owner->Load();
     // install.cmd and uninstall.cmd tell this DLL from the game's own by these words
     // (SHIM_MARKER), so every build has to carry them.

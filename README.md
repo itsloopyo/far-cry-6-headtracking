@@ -86,7 +86,7 @@ launch, repeat the two steps above in `bin_plus` as well.
    **4242**.
 5. Press **Start**.
 
-The mod listens on 4242 unless `UdpPort` in `FarCry6HeadTracking.ini` says otherwise. If
+The mod listens on 4242 unless `UdpPort` in `CameraUnlock.ini` says otherwise. If
 something else on the PC already has that port, change it in both places.
 
 ### VR Headset Setup
@@ -154,7 +154,7 @@ cluster still reaches all of them:
 camera's up axis (local). The difference is visible when looking up or down with
 the mouse or controller, then turning your head.
 
-The tracking mode and the yaw mode are saved to `FarCry6HeadTracking.ini` the moment
+The tracking mode and the yaw mode are saved to `CameraUnlock.ini` the moment
 you change them, so the game starts in the mode you left it in. `End` changes the
 current session only: the game starts with head tracking on or off as
 `EnableOnStartup` says.
@@ -187,13 +187,24 @@ Both are in the `[Light]` section of the settings file.
 
 ## Configuration
 
-The mod reads its settings when the game starts. Apart from creating or converting the
-file then, it writes to it only when a hotkey changes the tracking mode or the yaw mode.
+Settings live in `bin\CameraUnlock.ini` from this version on. `FarCry6HeadTracking.ini`,
+the file earlier versions used, is read once to fill it and is never changed.
+
+The mod reads its settings when the game starts. Apart from creating the file then, it
+writes to it only when a hotkey changes the tracking mode or the yaw mode.
 
 <!-- cameraunlock:config -->
-The mod reads its settings from `bin\FarCry6HeadTracking.ini` in the game folder, and creates the file when it starts and finds none. Edit it with any text editor.
+The mod reads its settings from `bin\CameraUnlock.ini` in the game folder, and creates the file when it starts and finds none. Edit it with any text editor.
 
-Earlier versions of the mod used an older layout for this file. The first time this version starts, it converts the file once into the layout below and keeps the file as it was beside it as `FarCry6HeadTracking.ini.pre-canonical`. `FarCry6HeadTracking.ini.pre-canonical.last`, when present, is the file as it was before the most recent conversion: the mod converts the file again when it finds the older layout later, for example after an older version of the mod rewrote it.
+A setting set to `default` takes its value from `Defaults.ini`, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads. Head tracking mods that keep their settings in another file do not read it, and neither do earlier versions of this mod. Writing a value in place of `default` changes that setting for this game only. When the mod saves a setting that a hotkey changed in game, it writes the new value in place of `default`, so that setting no longer follows `Defaults.ini` in this game until you set it to `default` again.
+
+`Defaults.ini` is `%AppData%\CameraUnlock\Defaults.ini` on Windows; `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini` on Linux, or `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, under Wine and Proton too; and `~/Library/Application Support/CameraUnlock/Defaults.ini` on macOS. The mod's log, where it writes one, names the file it read.
+
+When the mod starts and finds no `Defaults.ini`, it creates one holding the built-in values, unless Windows runs the game as a packaged app. The mod never changes `Defaults.ini` after that. Edit it with any text editor.
+
+Earlier versions of the mod kept these settings in `FarCry6HeadTracking.ini`, in the same folder. The first time this version starts and finds no `CameraUnlock.ini`, it reads your settings from `FarCry6HeadTracking.ini` and writes them into `CameraUnlock.ini`. It never changes `FarCry6HeadTracking.ini`, and does not read it again while `CameraUnlock.ini` exists.
+
+A setting that the defaults below set to `default` is written as `default` when the value imported for it equals its default at that start, which is the value `Defaults.ini` gives it, or the built-in value where `Defaults.ini` gives none. It then follows `Defaults.ini`. Every other setting is written with the value imported for it. `RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.
 
 Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:
 
@@ -201,7 +212,29 @@ Comments, and keys the mod never read, are not carried over. Nor are these, wher
 - A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
 - The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
 
-An older version of the mod may not read the new layout correctly. It reads a key that moved as its own default, and it can misread a hotkey or another value that is now written as a name. To go back to an older version, first copy `FarCry6HeadTracking.ini.pre-canonical` back over `FarCry6HeadTracking.ini`, which restores the old file.
+An older version of the mod reads `FarCry6HeadTracking.ini` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `FarCry6HeadTracking.ini`.
+
+Deleting only `CameraUnlock.ini` makes the next start read `FarCry6HeadTracking.ini` again. To go back to the defaults, replace everything in `CameraUnlock.ini` with the defaults below. Every setting they set to `default` then follows `Defaults.ini`.
+
+The built-in value of each setting set to `default` below:
+
+- `UdpPort=4242`
+- `EnableOnStartup=true`
+- `WorldSpaceYaw=true`
+- `RotationEnabled=true`
+- `LocalSmoothing=0.0`
+- `RemoteSmoothing=0.15`
+- `PositionEnabled=true`
+- `PositionLimitX=0.3`
+- `PositionLimitY=0.2`
+- `PositionLimitYDown=0.2`
+- `PositionLimitZ=0.4`
+- `PositionLimitZBack=0.1`
+- `ToggleKey=End, Ctrl+Shift+Y`
+- `CycleTrackingModeKey=PageUp, Ctrl+Shift+G`
+- `YawModeKey=PageDown, Ctrl+Shift+H`
+- `LightFollowsHead=true`
+- `LightMultiplier=1.5`
 
 With every setting at its default, the file reads:
 
@@ -209,6 +242,12 @@ With every setting at its default, the file reads:
 ; Far Cry 6 head tracking settings.
 ; Comments start with ; and go on their own line. Text after a value is part of the value.
 ; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; leave empty for none.
+; A setting set to default takes its value from Defaults.ini, which every head tracking mod
+; that keeps its settings in CameraUnlock.ini reads: %AppData%\CameraUnlock\Defaults.ini on
+; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on
+; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini
+; on macOS. The log names the file it read. Write a value instead of default to change that
+; setting for this game only.
 
 [CameraUnlock]
 ; Written by the mod. Leave this section in place.
@@ -216,53 +255,53 @@ ConfigFormat=1
 
 [Network]
 ; UDP port the mod receives tracker data on (OpenTrack protocol).
-UdpPort=4242
+UdpPort=default
 
 [General]
 ; true: head tracking is on when the game starts. ToggleKey turns it on and off.
-EnableOnStartup=true
+EnableOnStartup=default
 ; true: yaw turns around the world's up axis. false: around the camera's own up axis.
-WorldSpaceYaw=true
+WorldSpaceYaw=default
 ; true: turning your head turns the view.
 ; Tracking mode at startup, with PositionEnabled. The mode hotkey changes both.
-RotationEnabled=true
+RotationEnabled=default
 
 [Smoothing]
 ; Smoothing when the tracker runs on this PC. 0 is the least, 1 the most.
-LocalSmoothing=0.0
+LocalSmoothing=default
 ; Smoothing when the tracker is another device on the network, such as a phone.
 ; 0 is the least, 1 the most.
-RemoteSmoothing=0.15
+RemoteSmoothing=default
 
 [Position]
 ; true: moving your head moves the view.
 ; Tracking mode at startup, with RotationEnabled. The mode hotkey changes both.
-PositionEnabled=true
+PositionEnabled=default
 ; How far, in metres, leaning left or right can move the view.
-PositionLimitX=0.3
+PositionLimitX=default
 ; How far, in metres, raising your head can move the view.
-PositionLimitY=0.2
+PositionLimitY=default
 ; How far, in metres, lowering your head can move the view.
-PositionLimitYDown=0.2
+PositionLimitYDown=default
 ; How far, in metres, leaning forward can move the view.
-PositionLimitZ=0.4
+PositionLimitZ=default
 ; How far, in metres, leaning back can move the view.
-PositionLimitZBack=0.1
+PositionLimitZBack=default
 
 [Hotkeys]
 ; Turns head tracking on and off.
-ToggleKey=End, Ctrl+Shift+Y
+ToggleKey=default
 ; Changes the tracking mode: rotation and position, rotation only, position only.
-CycleTrackingModeKey=PageUp, Ctrl+Shift+G
+CycleTrackingModeKey=default
 ; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
-YawModeKey=PageDown, Ctrl+Shift+H
+YawModeKey=default
 
 [Light]
 ; true: a light you carry points where you look instead of where you aim.
-LightFollowsHead=true
+LightFollowsHead=default
 ; How far the light turns for each degree your head turns.
 ; 1 matches the view, 0 keeps the light on your aim.
-LightMultiplier=1.5
+LightMultiplier=default
 
 [Gameplay]
 ; true: head tracking holds the view still while another player is in the session,
@@ -306,7 +345,7 @@ every 600 frames carrying the pose being handed to the game.
   The log says `Bound UDP port 4242 ... tracking is live` when it does.
 - If nothing is holding the port, read the error the log quotes. Error 10013 means
   Windows has that port reserved (Hyper-V and WSL each reserve blocks of the high
-  range); pick a different `UdpPort` in `FarCry6HeadTracking.ini`.
+  range); pick a different `UdpPort` in `CameraUnlock.ini`.
 
 **Jittery or unstable tracking**
 
@@ -358,14 +397,14 @@ every 600 frames carrying the pose being handed to the game.
 
 ## Updating
 
-Download the new release and run `install.cmd` again. Your settings file is kept.
+Download the new release and run `install.cmd` again. Your settings files are kept.
 
 ## Uninstalling
 
 Run `uninstall.cmd`. It restores the original library from the `.backup` beside it
-and removes the mod's log. `bin\FarCry6HeadTracking.ini` is kept, with the
-`.pre-canonical` copies beside it, so your settings are still there if you install
-again. There is no separate mod loader to take away, so
+and removes the mod's log. `bin\CameraUnlock.ini` and `bin\FarCry6HeadTracking.ini`
+are kept, so your settings are still there if you install again, and `Defaults.ini` is
+not touched. There is no separate mod loader to take away, so
 `uninstall.cmd /force` is accepted but has nothing extra to remove here.
 
 If you copied the mod into `bin_plus` by hand, undo that by hand as well: rename

@@ -132,12 +132,14 @@ cfg::LegacyImport<Config> LegacyConfigImport() {
     return import;
 }
 
-cfg::ConfigOwnerOptions<Config> ConfigOwnerOptionsFor(const std::wstring& path) {
+cfg::ConfigOwnerOptions<Config> ConfigOwnerOptionsFor(const std::wstring& folder, cfg::DefaultsFile defaults) {
     cfg::ConfigOwnerOptions<Config> options;
-    options.path = path;
+    options.path = folder + L"\\" + kConfigFileName;
     options.table = ConfigTable();
     options.import = LegacyConfigImport();
+    options.legacy_path = folder + L"\\" + kLegacyConfigFileName;
     options.header.display_name = kGameDisplayName;
+    options.defaults = std::move(defaults);
     return options;
 }
 

@@ -5,6 +5,7 @@
 
 #include "cameraunlock/config/config_owner.h"
 #include "cameraunlock/config/config_table.h"
+#include "cameraunlock/config/defaults_file.h"
 #include "cameraunlock/config/head_tracking_config.h"
 #include "cameraunlock/config/legacy_import.h"
 
@@ -22,7 +23,12 @@ enum class ReadStatus;
 constexpr char kGameDisplayName[] = "Far Cry 6";
 
 // The settings file, beside the mod DLL in the game's bin folder.
-constexpr wchar_t kConfigFileName[] = L"FarCry6HeadTracking.ini";
+constexpr wchar_t kConfigFileName[] = L"CameraUnlock.ini";
+
+// The file every build before the canonical format read, in the same folder. The owner
+// imports it once while kConfigFileName is absent and never writes it, so an older build
+// still reads it after a rollback.
+constexpr wchar_t kLegacyConfigFileName[] = L"FarCry6HeadTracking.ini";
 
 struct Config : cameraunlock::HeadTrackingConfig {
     // The game's co-op sessions leave the view under the mod's control the same way a
@@ -43,6 +49,9 @@ cameraunlock::config::LegacyImport<Config> LegacyConfigImport();
 cameraunlock::config::ImportResult MapLegacyConfig(legacy::ReadStatus status, const legacy::Config& read,
                                                    Config& out);
 
-cameraunlock::config::ConfigOwnerOptions<Config> ConfigOwnerOptionsFor(const std::wstring& path);
+// The owner's options for the settings in `folder`, the folder holding the mod DLL. The mod
+// passes the player's own Defaults.ini, and every test a scratch one.
+cameraunlock::config::ConfigOwnerOptions<Config> ConfigOwnerOptionsFor(const std::wstring& folder,
+                                                                       cameraunlock::config::DefaultsFile defaults);
 
 }  // namespace FarCry6HeadTracking

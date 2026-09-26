@@ -5,8 +5,9 @@
 //
 //   oracle     v0.1.0's reader (oracle/), the newest published build, and v0.1.0's startup code
 //   import     the frozen reader in src/legacy_config/, and the startup code it ran under
-//   migration  the config owner converting the file, then the canonical reader and table on
-//              the result, and the startup code of this build
+//   migration  the config owner in a folder holding only the legacy file, which imports it
+//              into a new CameraUnlock.ini, then the canonical reader and table on that file,
+//              and the startup code of this build
 //
 // Comparison 1, oracle against import, finds what a player updating from v0.1.0 sees change
 // that the conversion did not cause. Every difference it may find is listed in
@@ -15,7 +16,10 @@
 // Comparison 2, import against migration, is the proof for the migration: no difference but
 // a sensitivity or axis inversion the player set away from its shipped identity value, which
 // the import must list as pose shaping and drop (approved change pose_shaping). No default
-// moved, so the no-file input has no difference either.
+// moved, so the no-file input has no difference either. Every input migrates twice, over a
+// Defaults.ini at the built-in values and over one holding other values on every row the
+// game takes from it, since the migration writes `default` where the imported value equals
+// what Defaults.ini gives: the player runs on what the old build ran on either way.
 //
 // The distinct migrated files are written beside the executable under migrated\, for
 // lint-migrated.mjs to run core's canonical config lint over.
@@ -538,6 +542,7 @@ struct MigrationTally {
     int converted = 0;
     int refused = 0;
     int with_pose_shaping_dropped = 0;
+    int written_as_values = 0;
 };
 
 std::string Render(const Config& c) {
@@ -548,61 +553,146 @@ std::string Render(const Config& c) {
 // The run
 // ---------------------------------------------------------------------------
 
+// Two Defaults.ini files the migration reads over: built_in, which the first owner creates with
+// the built-in values, and edited, which gives every row the game takes from it another value.
 struct Folders {
     std::wstring oracle;
     std::wstring import;
     std::wstring migration;
+    std::wstring built_in;
+    std::wstring edited;
 };
 
 const wchar_t kIniName[] = L"FarCry6HeadTracking.ini";
+const wchar_t kCanonicalName[] = L"CameraUnlock.ini";
 
-void MigrateInput(const Folders& f, const std::string& name, const std::optional<std::string>& bytes,
-                  const ImportRun& i, const cfg::ImportResult* result, MigrationTally& tally) {
+const char kEditedDefaults[] =
+    "[CameraUnlock]\r\nConfigFormat=1\r\n\r\n"
+    "[Network]\r\nUdpPort=5000\r\n\r\n"
+    "[General]\r\nEnableOnStartup=false\r\nWorldSpaceYaw=false\r\nRotationEnabled=true\r\n\r\n"
+    "[Smoothing]\r\nLocalSmoothing=0.5\r\nRemoteSmoothing=0.4\r\n\r\n"
+    "[Position]\r\nPositionEnabled=false\r\nPositionLimitX=0.5\r\nPositionLimitY=0.25\r\n"
+    "PositionLimitYDown=0.15\r\nPositionLimitZ=0.3\r\nPositionLimitZBack=0.05\r\n\r\n"
+    "[Hotkeys]\r\nToggleKey=F8\r\nCycleTrackingModeKey=F9\r\nYawModeKey=F10\r\n\r\n"
+    "[Light]\r\nLightFollowsHead=false\r\nLightMultiplier=1.0\r\n";
+
+std::wstring DefaultsPath(const std::wstring& folder) {
+    return folder + L"\\Defaults.ini";
+}
+
+struct FileState {
+    std::string bytes;
+    uint64_t write_time = 0;
+    DWORD attributes = 0;
+
+    bool operator==(const FileState& o) const {
+        return bytes == o.bytes && write_time == o.write_time && attributes == o.attributes;
+    }
+    bool operator!=(const FileState& o) const { return !(*this == o); }
+};
+
+FileState StateOf(const std::wstring& path) {
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) {
+        throw std::runtime_error("cannot read the attributes of " + Narrow(path));
+    }
+    FileState state;
+    state.bytes = ReadBytes(path);
+    state.write_time = (static_cast<uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) |
+                       data.ftLastWriteTime.dwLowDateTime;
+    state.attributes = data.dwFileAttributes;
+    return state;
+}
+
+cfg::ConfigOwnerOptions<Config> OptionsOver(const std::wstring& folder, const std::wstring& defaultsFolder) {
+    return FarCry6HeadTracking::ConfigOwnerOptionsFor(folder, cfg::DefaultsFile::At(DefaultsPath(defaultsFolder)));
+}
+
+// One migration of `bytes` as the legacy file, alone in the folder, over the Defaults.ini in
+// `defaultsFolder`, with the legacy file read-only when asked. Returns the bytes of the new
+// CameraUnlock.ini, or nothing when the load did not migrate.
+std::optional<std::string> MigrateOnce(const Folders& f, const std::string& name, const std::string& bytes,
+                                       const ImportRun& i, const std::wstring& defaultsFolder, bool readOnly,
+                                       MigrationTally& tally) {
     using cfg::ConfigLoadStatus;
     EmptyFolder(f.migration);
-    const std::wstring path = f.migration + L"\\" + kIniName;
-    if (bytes) WriteBytes(path, *bytes);
-    cfg::ConfigOwner<Config> owner(FarCry6HeadTracking::ConfigOwnerOptionsFor(path));
+    const std::wstring legacyPath = f.migration + L"\\" + kIniName;
+    WriteBytes(legacyPath, bytes);
+    if (readOnly) SetFileAttributesW(legacyPath.c_str(), FILE_ATTRIBUTE_READONLY);
+    const FileState legacyBefore = StateOf(legacyPath);
+    const std::string defaultsBefore = ReadBytes(DefaultsPath(defaultsFolder));
+
+    cfg::ConfigOwner<Config> owner(OptionsOver(f.migration, defaultsFolder));
     const cfg::ConfigLoadResult<Config> loaded = owner.Load();
     const std::map<std::wstring, std::string> after = Snapshot(f.migration);
+    if (StateOf(legacyPath) != legacyBefore) Fail(name, "the load changed the legacy file's bytes, time or attributes");
+    if (ReadBytes(DefaultsPath(defaultsFolder)) != defaultsBefore) Fail(name, "the load changed Defaults.ini");
 
-    if (!bytes) {
-        ++tally.created;
-        if (loaded.status != ConfigLoadStatus::Created) Fail(name, "no file is not Created");
-        if (ReadBytes(path) != tally.committed) Fail(name, "the created file is not config/FarCry6HeadTracking.ini");
-    } else if (!ImportUsable(i.status)) {
-        ++tally.refused;
+    if (!ImportUsable(i.status)) {
         if (loaded.status != ConfigLoadStatus::LegacyRefused) Fail(name, "a file the import refuses is not LegacyRefused");
-        if (after != std::map<std::wstring, std::string>{{kIniName, *bytes}}) {
-            Fail(name, "a refused file did not keep its bytes, or got a copy");
+        if (after != std::map<std::wstring, std::string>{{kIniName, bytes}}) {
+            Fail(name, "a refused import left a file beside the legacy file");
         }
-        return;
-    } else {
-        ++tally.converted;
-        if (loaded.status != ConfigLoadStatus::Migrated) {
-            Fail(name, std::string("the migration is ") + cfg::ConfigLoadStatusName(loaded.status) + ": " + loaded.reason);
-            return;
-        }
-        const auto copy = after.find(std::wstring(kIniName) + L".pre-canonical");
-        if (copy == after.end() || copy->second != *bytes) Fail(name, ".pre-canonical is not the input");
-        if (after.size() != 2) Fail(name, "the migration left files other than the config and its copy");
-        tally.with_pose_shaping_dropped += CheckPoseShaping(name, i.cfg, *result) > 0 ? 1 : 0;
+        return std::nullopt;
     }
-
-    const std::string migrated = ReadBytes(path);
-    if (Render(loaded.config) != migrated) Fail(name, "rendering the re-read Config does not give the migrated bytes");
+    if (loaded.status != ConfigLoadStatus::Migrated) {
+        Fail(name, std::string("the migration is ") + cfg::ConfigLoadStatusName(loaded.status) + ": " + loaded.reason);
+        return std::nullopt;
+    }
+    if (after.size() != 2 || after.count(kIniName) == 0 || after.count(kCanonicalName) == 0) {
+        Fail(name, "the migration left the folder holding more than the legacy file and CameraUnlock.ini");
+        return std::nullopt;
+    }
+    const std::string migrated = after.at(kCanonicalName);
     for (const std::string& d : StartupDifferences(FromImport(i.cfg), FromMigration(loaded.config))) {
         Fail(name, "comparison 2: " + d);
     }
     tally.migrated.insert(migrated);
 
-    cfg::ConfigOwner<Config> again(FarCry6HeadTracking::ConfigOwnerOptionsFor(path));
+    cfg::ConfigOwner<Config> again(OptionsOver(f.migration, defaultsFolder));
     const cfg::ConfigLoadResult<Config> reread = again.Load();
+    const bool saysLegacyNotRead = std::any_of(reread.log.begin(), reread.log.end(), [](const std::string& line) {
+        return line.find("FarCry6HeadTracking.ini is left as it was and is not read") != std::string::npos;
+    });
     if (reread.status != ConfigLoadStatus::Canonical || !reread.diagnostics.empty() ||
-        Render(reread.config) != migrated || Snapshot(f.migration) != after ||
-        ReadBytes(path) != migrated) {
-        Fail(name, "migrating the migrated file does something");
+        Render(reread.config) != Render(loaded.config) || Snapshot(f.migration) != after ||
+        StateOf(legacyPath) != legacyBefore || ReadBytes(DefaultsPath(defaultsFolder)) != defaultsBefore) {
+        Fail(name, "a second start after the migration does something");
     }
+    if (!saysLegacyNotRead) Fail(name, "a second start does not say the legacy file is not read");
+    return migrated;
+}
+
+void MigrateInput(const Folders& f, const std::string& name, const std::optional<std::string>& bytes,
+                  const ImportRun& i, const cfg::ImportResult* result, MigrationTally& tally) {
+    using cfg::ConfigLoadStatus;
+    if (!bytes) {
+        ++tally.created;
+        EmptyFolder(f.migration);
+        cfg::ConfigOwner<Config> owner(OptionsOver(f.migration, f.built_in));
+        const cfg::ConfigLoadResult<Config> loaded = owner.Load();
+        if (loaded.status != ConfigLoadStatus::Created) Fail(name, "no file is not Created");
+        if (Snapshot(f.migration) != std::map<std::wstring, std::string>{{kCanonicalName, tally.committed}}) {
+            Fail(name, "the created file is not config/FarCry6HeadTracking.ini, or is not alone");
+        }
+        for (const std::string& d : StartupDifferences(FromImport(i.cfg), FromMigration(loaded.config))) {
+            Fail(name, "comparison 2: " + d);
+        }
+        return;
+    }
+
+    const std::optional<std::string> migrated = MigrateOnce(f, name, *bytes, i, f.built_in, false, tally);
+    const std::optional<std::string> readOnly = MigrateOnce(f, name + ", read-only", *bytes, i, f.built_in, true, tally);
+    const std::optional<std::string> overEdited =
+        MigrateOnce(f, name + ", edited Defaults.ini", *bytes, i, f.edited, false, tally);
+    if (!ImportUsable(i.status)) {
+        ++tally.refused;
+        return;
+    }
+    ++tally.converted;
+    if (migrated != readOnly) Fail(name, "a read-only legacy file does not migrate as a writable one does");
+    if (migrated && overEdited && *migrated != *overEdited) ++tally.written_as_values;
+    tally.with_pose_shaping_dropped += CheckPoseShaping(name, i.cfg, *result) > 0 ? 1 : 0;
 }
 
 void RunInput(const Folders& f, const std::string& name, const std::optional<std::string>& bytes,
@@ -690,10 +780,33 @@ int main() {
         const std::wstring root = std::wstring(temp) + L"farcry6-config-differential-" +
                                   std::to_wstring(GetCurrentProcessId());
         CreateDirectoryW(root.c_str(), nullptr);
-        const Folders folders{MakeFolder(root, L"oracle"), MakeFolder(root, L"import"),
-                              MakeFolder(root, L"migration")};
+        const Folders folders{MakeFolder(root, L"oracle"), MakeFolder(root, L"import"), MakeFolder(root, L"migration"),
+                              MakeFolder(root, L"built-in"), MakeFolder(root, L"edited")};
         MigrationTally tally;
         tally.committed = ReadBytes(Widen(FARCRY6_COMMITTED_CONFIG));
+
+        // The first owner creates the built-in Defaults.ini, and the edited one has to reach
+        // every row it names, or the runs over it prove nothing.
+        {
+            EmptyFolder(folders.migration);
+            cfg::ConfigOwner<Config> owner(OptionsOver(folders.migration, folders.built_in));
+            const cfg::ConfigLoadResult<Config> loaded = owner.Load();
+            if (loaded.log.empty() || loaded.log.front().find("(created with the built-in values)") == std::string::npos) {
+                Fail("Defaults.ini", "the first start does not create Defaults.ini with the built-in values");
+            }
+            WriteBytes(DefaultsPath(folders.edited), kEditedDefaults);
+            EmptyFolder(folders.migration);
+            cfg::ConfigOwner<Config> edited(OptionsOver(folders.migration, folders.edited));
+            const Config c = edited.Load().config;
+            if (c.udp_port != 5000 || c.enable_on_startup || c.world_space_yaw || !c.rotation_enabled ||
+                c.position_enabled || c.local_smoothing != 0.5f || c.remote_smoothing != 0.4f ||
+                c.position.limit_x != 0.5f || c.position.limit_y != 0.25f || c.position.limit_y_down != 0.15f ||
+                c.position.limit_z != 0.3f || c.position.limit_z_back != 0.05f || c.toggle_key_name != "F8" ||
+                c.cycle_tracking_mode_key_name != "F9" || c.yaw_mode_key_name != "F10" || c.light.follows_head ||
+                c.light.multiplier != 1.0f) {
+                Fail("Defaults.ini", "the edited Defaults.ini does not reach every row it names");
+            }
+        }
 
         TestFrozenDefaults();
         TestRegistrationModel();
@@ -726,16 +839,17 @@ int main() {
 
         for (const auto& [name, bytes] : inputs) RunInput(folders, name, bytes, tally);
 
-        // Fresh equals upgrade: each published build's first-run output converts to the
-        // committed file, as no file is created as it.
+        // Fresh equals upgrade: over a Defaults.ini at the built-in values, each published
+        // build's first-run output imports into the file a first start creates.
         if (tally.migrated.count(tally.committed) == 0) Fail("first run", "no input migrated to the committed file");
         for (const std::string& file : {firstRunDev, firstRun}) {
             EmptyFolder(folders.migration);
-            const std::wstring path = folders.migration + L"\\" + kIniName;
-            WriteBytes(path, file);
-            cfg::ConfigOwner<Config> owner(FarCry6HeadTracking::ConfigOwnerOptionsFor(path));
+            WriteBytes(folders.migration + L"\\" + kIniName, file);
+            cfg::ConfigOwner<Config> owner(OptionsOver(folders.migration, folders.built_in));
             owner.Load();
-            if (ReadBytes(path) != tally.committed) Fail("first run", "a first-run file does not convert to the committed file");
+            if (ReadBytes(folders.migration + L"\\" + kCanonicalName) != tally.committed) {
+                Fail("first run", "a first-run file does not import into the committed file");
+            }
         }
 
         const std::vector<IniMutation> corpus =
@@ -749,11 +863,12 @@ int main() {
             if (d.seen == 0) Fail(d.id, "a listed difference no input shows");
         }
         std::printf("comparison 2, the frozen reader against the migration: %d created, %d converted "
-                    "(%d with a changed sensitivity or inversion dropped), %d refused as v0.1.0 refused them, "
-                    "%zu distinct files\n",
-                    tally.created, tally.converted, tally.with_pose_shaping_dropped, tally.refused,
-                    tally.migrated.size());
+                    "(%d with a changed sensitivity or inversion dropped, %d written differently over the "
+                    "edited Defaults.ini), %d refused as v0.1.0 refused them, %zu distinct files\n",
+                    tally.created, tally.converted, tally.with_pose_shaping_dropped, tally.written_as_values,
+                    tally.refused, tally.migrated.size());
         if (tally.with_pose_shaping_dropped == 0) Fail("pose shaping", "no input drops a changed value");
+        if (tally.written_as_values == 0) Fail("Defaults.ini", "no input migrates differently over the edited Defaults.ini");
 
         wchar_t exe[MAX_PATH];
         GetModuleFileNameW(nullptr, exe, MAX_PATH);
@@ -765,7 +880,8 @@ int main() {
             WriteBytes(lintDir + L"\\" + std::to_wstring(n++) + L".ini", file);
         }
 
-        for (const std::wstring& dir : {folders.oracle, folders.import, folders.migration}) {
+        for (const std::wstring& dir :
+             {folders.oracle, folders.import, folders.migration, folders.built_in, folders.edited}) {
             EmptyFolder(dir);
             RemoveDirectoryW(dir.c_str());
         }

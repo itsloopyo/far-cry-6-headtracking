@@ -64,11 +64,6 @@ std::string ReadBytes(const Path& path) {
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
-void WriteBytes(const std::wstring& path, const std::string& bytes) {
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-}
-
 FrameSample Rotation(float yaw, float pitch, float roll) {
     FrameSample s;
     s.has_rotation = true;
@@ -286,14 +281,12 @@ void TestSanitizers() {
           "a plain decimal parses");
 }
 
-// The settings file the repo commits is what the table renders from its defaults, byte
-// for byte. `pixi run render-config` rewrites it after a change to a row.
+// The settings file the repo commits is the table's fresh render, the bytes the owner
+// creates at first launch. `pixi run render-config` rewrites it after a change to a row.
 void TestCommittedConfigIsRendered() {
-    const auto table = ConfigTable();
-    const std::string rendered =
-        cameraunlock::config::RenderCanonical(table, table.defaults(), {kGameDisplayName});
+    const std::string rendered = cameraunlock::config::RenderCanonicalFresh(ConfigTable(), {kGameDisplayName});
     Check(ReadBytes(FARCRY6_COMMITTED_CONFIG) == rendered,
-          "config/FarCry6HeadTracking.ini is the table rendered from its defaults (pixi run render-config)");
+          "config/FarCry6HeadTracking.ini is the table's fresh render (pixi run render-config)");
 }
 
 // A fresh install and an upgrade from the defaults of the last pre-canonical build start
@@ -340,30 +333,46 @@ std::vector<std::string> ChangedLines(const std::string& before, const std::stri
     return changed;
 }
 
-// A save changes the lines of its rows and no other byte, the yaw mode and the tracking
-// mode persist, and End's row cannot be saved at all.
+bool LogSays(const std::vector<std::string>& log, const std::string& text) {
+    for (const std::string& line : log) {
+        if (line.find(text) != std::string::npos) return true;
+    }
+    return false;
+}
+
+// A first start with no settings file creates the committed file. A save changes the lines
+// of its rows and no other byte, writes a value over `default` and says so, and never touches
+// Defaults.ini; the yaw mode and the tracking mode persist, and End's row cannot be saved.
 void TestTogglesSave() {
     using cameraunlock::config::ConfigLoadStatus;
     using cameraunlock::config::ConfigOwner;
     using cameraunlock::config::ConfigSaveStatus;
+    using cameraunlock::config::DefaultsFile;
 
     wchar_t temp[MAX_PATH];
     GetTempPathW(MAX_PATH, temp);
     const std::wstring dir = std::wstring(temp) + L"farcry6-config-save-" + std::to_wstring(GetCurrentProcessId());
+    const std::wstring global = dir + L"\\global";
     CreateDirectoryW(dir.c_str(), nullptr);
+    CreateDirectoryW(global.c_str(), nullptr);
     const std::wstring path = dir + L"\\" + kConfigFileName;
+    const std::wstring defaults = global + L"\\Defaults.ini";
     const std::string committed = ReadBytes(FARCRY6_COMMITTED_CONFIG);
-    WriteBytes(path, committed);
 
+    std::string defaultsBytes;
     {
-        ConfigOwner<Config> owner(ConfigOwnerOptionsFor(path));
-        Check(owner.Load().status == ConfigLoadStatus::Canonical, "the committed file loads as canonical");
+        ConfigOwner<Config> owner(ConfigOwnerOptionsFor(dir, DefaultsFile::At(defaults)));
+        Check(owner.Load().status == ConfigLoadStatus::Created, "a first start with no settings file creates one");
+        Check(ReadBytes(path) == committed, "the created file is config/FarCry6HeadTracking.ini");
+        defaultsBytes = ReadBytes(defaults);
 
-        Check(owner.Save([](Config& c) { c.world_space_yaw = false; }).status == ConfigSaveStatus::Saved,
-              "the yaw mode saves");
+        const auto yaw = owner.Save([](Config& c) { c.world_space_yaw = false; });
+        Check(yaw.status == ConfigSaveStatus::Saved, "the yaw mode saves");
         const std::string afterYaw = ReadBytes(path);
         Check(ChangedLines(committed, afterYaw) == std::vector<std::string>{"WorldSpaceYaw=false"},
-              "saving the yaw mode changes its line and nothing else");
+              "saving the yaw mode writes its value over default and changes nothing else");
+        Check(LogSays(yaw.log, "WorldSpaceYaw=false is now set for this game, and no longer follows Defaults.ini"),
+              "the save says the yaw mode no longer follows Defaults.ini");
 
         const auto channels = cameraunlock::EncodeTrackingMode(cameraunlock::TrackingMode::RotationOnly);
         Check(owner.Save([channels](Config& c) {
@@ -371,8 +380,9 @@ void TestTogglesSave() {
                   c.position_enabled = channels.position_enabled;
               }).status == ConfigSaveStatus::Saved,
               "the tracking mode saves");
-        Check(ChangedLines(afterYaw, ReadBytes(path)) == std::vector<std::string>{"PositionEnabled=false"},
-              "saving rotation only changes PositionEnabled and nothing else");
+        Check(ChangedLines(afterYaw, ReadBytes(path)) ==
+                  std::vector<std::string>{"RotationEnabled=true", "PositionEnabled=false"},
+              "saving rotation only writes both rows of the tracking mode and nothing else");
 
         bool refused = false;
         try {
@@ -381,16 +391,20 @@ void TestTogglesSave() {
             refused = true;
         }
         Check(refused, "EnableOnStartup is not Writable, so the End toggle cannot persist");
+        Check(ReadBytes(defaults) == defaultsBytes, "no save changes Defaults.ini");
     }
 
-    ConfigOwner<Config> reopened(ConfigOwnerOptionsFor(path));
+    ConfigOwner<Config> reopened(ConfigOwnerOptionsFor(dir, DefaultsFile::At(defaults)));
     const auto again = reopened.Load();
     Check(again.status == ConfigLoadStatus::Canonical && again.diagnostics.empty() &&
               !again.config.world_space_yaw && again.config.rotation_enabled && !again.config.position_enabled &&
               again.config.enable_on_startup,
           "the saved yaw and tracking mode come back at the next start");
+    Check(ReadBytes(defaults) == defaultsBytes, "a start never changes an existing Defaults.ini");
 
     DeleteFileW(path.c_str());
+    DeleteFileW(defaults.c_str());
+    RemoveDirectoryW(global.c_str());
     RemoveDirectoryW(dir.c_str());
 }
 
@@ -680,9 +694,7 @@ void TestZoomScaling() {
 int main(int argc, char** argv) {
     // `pixi run render-config`: write the committed settings file and run nothing else.
     if (argc == 3 && std::strcmp(argv[1], "--render-config") == 0) {
-        const auto table = ConfigTable();
-        const std::string rendered =
-            cameraunlock::config::RenderCanonical(table, table.defaults(), {kGameDisplayName});
+        const std::string rendered = cameraunlock::config::RenderCanonicalFresh(ConfigTable(), {kGameDisplayName});
         std::ofstream out(argv[2], std::ios::binary | std::ios::trunc);
         out.write(rendered.data(), static_cast<std::streamsize>(rendered.size()));
         if (!out) {
