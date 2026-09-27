@@ -142,6 +142,11 @@ cluster still reaches all of them:
 | Toggle tracking     | `End`       | `Ctrl+Shift+Y`  |
 | Cycle tracking mode | `Page Up`   | `Ctrl+Shift+G`  |
 | Switch world/local yaw | `Page Down` | `Ctrl+Shift+H` |
+| Toggle true free look | `Insert`    | `Ctrl+Shift+U` |
+
+Far Cry 6 opens the Arsenal on `U`, and it still does with Ctrl and Shift held, so
+`Ctrl+Shift+U` opens the Arsenal as well as toggling true free look. Use `Insert`,
+or put another key in `TrueFreeLookKey`.
 
 `Page Up` / `Ctrl+Shift+G` cycles tracking mode:
 
@@ -154,8 +159,8 @@ cluster still reaches all of them:
 camera's up axis (local). The difference is visible when looking up or down with
 the mouse or controller, then turning your head.
 
-The tracking mode and the yaw mode are saved to `CameraUnlock.ini` the moment
-you change them, so the game starts in the mode you left it in. `End` changes the
+The tracking mode, the yaw mode and true free look are saved to `CameraUnlock.ini`
+the moment you change them, so the game starts in the mode you left it in. `End` changes the
 current session only: the game starts with head tracking on or off as
 `EnableOnStartup` says.
 
@@ -169,8 +174,16 @@ Head tracking stays on while you aim. The weapon stays where your mouse or
 controller points it, so with your head turned it sits off to one side with its
 sights still lined up, and your rounds land where those sights point. Head
 movement is scaled to the zoom of iron sights, so aiming down them does not
-magnify it. Scopes have not been tested. Leaning eases out while the sights are
-up, because it would move your eye off them.
+magnify it. Scopes have not been tested.
+
+By default leaning never takes your eye off the sights. `Insert` /
+`Ctrl+Shift+U` switches to **true free look**: the weapon stays put and your
+head moves freely around it, so to see down the sights you have to put your head
+behind them, as you would in VR. It is hard, and it is off by default. The mod
+saves the mode you pick, so it holds the next time you start the game.
+
+Leaning eases out while the sights are up, because it would move your eye off
+them. In true free look it stays.
 
 ### Flashlight
 
@@ -192,7 +205,7 @@ Settings live in `bin\CameraUnlock.ini` from this version on. `FarCry6HeadTracki
 the file earlier versions used, is read once to fill it and is never changed.
 
 The mod reads its settings when the game starts. Apart from creating the file then, it
-writes to it only when a hotkey changes the tracking mode or the yaw mode.
+writes to it only when a hotkey changes the tracking mode, the yaw mode or true free look.
 
 <!-- cameraunlock:config -->
 The mod reads its settings from `bin\CameraUnlock.ini` in the game folder, and creates the file when it starts and finds none. Edit it with any text editor.
@@ -212,6 +225,7 @@ The built-in value of each setting set to `default` below:
 - `LocalSmoothing=0.0`
 - `RemoteSmoothing=0.15`
 - `PositionEnabled=true`
+- `TrueFreeLook=false`
 - `PositionLimitX=0.3`
 - `PositionLimitY=0.2`
 - `PositionLimitYDown=0.2`
@@ -222,6 +236,7 @@ The built-in value of each setting set to `default` below:
 - `ToggleKey=End, Ctrl+Shift+Y`
 - `CycleTrackingModeKey=PageUp, Ctrl+Shift+G`
 - `YawModeKey=PageDown, Ctrl+Shift+H`
+- `TrueFreeLookKey=Insert, Ctrl+Shift+U`
 - `LightFollowsHead=true`
 - `LightMultiplier=1.5`
 
@@ -266,6 +281,9 @@ RemoteSmoothing=default
 ; true: moving your head moves the view.
 ; Tracking mode at startup, with RotationEnabled. The mode hotkey changes both.
 PositionEnabled=default
+; false: while you aim down the sights, leaning keeps your eye on the sights.
+; true: the weapon stays put and your head moves freely around it (true free look).
+TrueFreeLook=default
 ; How far, in metres, leaning left or right can move the view.
 PositionLimitX=default
 ; How far, in metres, raising your head can move the view.
@@ -294,6 +312,8 @@ ToggleKey=default
 CycleTrackingModeKey=default
 ; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
 YawModeKey=default
+; Switches between keeping your eye on the sights and true free look (TrueFreeLook).
+TrueFreeLookKey=default
 
 [Light]
 ; true: a light you carry points where you look instead of where you aim.
@@ -373,6 +393,11 @@ every 600 frames carrying the pose being handed to the game.
 
 - Your head is turned: the weapon stays on your aim and you are looking past it.
   Turn back to it, or move your aim to where you are looking.
+
+**I can't see down the sights, they are misaligned**
+
+- You are in true free look and your head is leaned off them. Move your head back
+  behind them, or press `Insert` / `Ctrl+Shift+U` to return to sights locked.
 
 **The game window moved when I launched**
 

@@ -36,10 +36,19 @@ struct LegacyHotkeyCodes {
     int yaw_mode;
 };
 
+constexpr int kVkInsert = 0x2D;
+
 LegacyHotkeyCodes EffectiveHotkeys(const legacy::Config& read) {
     const bool cycleKeyBound = read.vk_cycle_mode != read.vk_toggle;
     const bool yawKeyBound = read.vk_yaw_mode != read.vk_toggle && read.vk_yaw_mode != read.vk_cycle_mode;
     return {read.vk_toggle, cycleKeyBound ? read.vk_cycle_mode : 0, yawKeyBound ? read.vk_yaw_mode : 0};
+}
+
+// The legacy build had no true free look. Its key list comes after the other three, so where
+// one of them already has Insert the list keeps only its chord, as the old build left a later
+// action's key unbound.
+bool InsertTaken(const LegacyHotkeyCodes& keys) {
+    return keys.toggle == kVkInsert || keys.cycle_mode == kVkInsert || keys.yaw_mode == kVkInsert;
 }
 
 }  // namespace
@@ -49,8 +58,8 @@ cfg::ConfigTable<Config> ConfigTable() {
     cfg::ConfigTable<Config> table = cfg::HeadTrackingConfigTable<Config>(
         {C::UdpPort, C::EnableOnStartup, C::WorldSpaceYaw, C::RotationEnabled, C::LocalSmoothing,
          C::RemoteSmoothing, C::PositionEnabled, C::PositionLimitX, C::PositionLimitY, C::PositionLimitYDown,
-         C::PositionLimitZ, C::PositionLimitZBack, C::CollisionEnabled, C::CollisionMargin, C::CollisionChannel,
-         C::CollisionReleaseSmoothing, C::ToggleKey, C::CycleTrackingModeKey, C::YawModeKey, C::LightFollowsHead,
+         C::PositionLimitZ, C::PositionLimitZBack, C::TrueFreeLook, C::CollisionEnabled, C::CollisionMargin, C::CollisionChannel,
+         C::CollisionReleaseSmoothing, C::ToggleKey, C::CycleTrackingModeKey, C::YawModeKey, C::TrueFreeLookKey, C::LightFollowsHead,
          C::LightMultiplier});
     table.Select(C::CollisionMargin)
         .Comment("How far, in metres, the view is held off a wall when you lean into it.\n"
@@ -59,7 +68,8 @@ cfg::ConfigTable<Config> ConfigTable() {
         .Comment("The game's collision layers the wall check tests against, as a bit mask written in decimal.");
     table.Select(C::WorldSpaceYaw).Writable()
         .Select(C::RotationEnabled).Writable()
-        .Select(C::PositionEnabled).Writable();
+        .Select(C::PositionEnabled).Writable()
+        .Select(C::TrueFreeLook).Writable();
     table.Local("Gameplay", "DisableInCoop", &Config::disable_in_coop, cfg::BoolCodec(),
                 "true: head tracking holds the view still while another player is in the session,\n"
                 "so co-op runs the game's own camera.");
@@ -125,6 +135,9 @@ cfg::ImportResult MapLegacyConfig(legacy::ReadStatus status, const legacy::Confi
     out.toggle_key_name = KeyList(keys.toggle, "Toggle", 'Y', dropped);
     out.cycle_tracking_mode_key_name = KeyList(keys.cycle_mode, "CycleMode", 'G', dropped);
     out.yaw_mode_key_name = KeyList(keys.yaw_mode, "YawMode", 'H', dropped);
+    if (InsertTaken(keys)) {
+        out.true_free_look_key_name = FormatKeyBindings({{KeyModifiers::kCtrl | KeyModifiers::kShift, 'U'}});
+    }
 
     // A setting the player never changed from what the old build wrote on its first start
     // follows Defaults.ini. LimitY stood for both vertical bounds, and the lean's wall check
@@ -144,11 +157,13 @@ cfg::ImportResult MapLegacyConfig(legacy::ReadStatus status, const legacy::Confi
     follows.Setting(C::PositionLimitYDown, read.pos_limit_y, shipped.pos_limit_y);
     follows.Setting(C::PositionLimitZ, read.pos_limit_z, shipped.pos_limit_z);
     follows.Setting(C::PositionLimitZBack, read.pos_limit_z_back, shipped.pos_limit_z_back);
+    follows.NotInLegacy(C::TrueFreeLook);
     follows.NotInLegacy(C::CollisionEnabled);
     follows.NotInLegacy(C::CollisionReleaseSmoothing);
     follows.Setting(C::ToggleKey, keys.toggle, shippedKeys.toggle);
     follows.Setting(C::CycleTrackingModeKey, keys.cycle_mode, shippedKeys.cycle_mode);
     follows.Setting(C::YawModeKey, keys.yaw_mode, shippedKeys.yaw_mode);
+    follows.Setting(C::TrueFreeLookKey, !InsertTaken(keys));
     follows.NotInLegacy(C::LightFollowsHead);
     follows.NotInLegacy(C::LightMultiplier);
 

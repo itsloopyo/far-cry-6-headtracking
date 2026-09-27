@@ -27,6 +27,7 @@ std::vector<HotkeyList> HotkeyLists(const Config& cfg) {
         {HotkeyAction::Toggle, Parse(cfg.toggle_key_name, "ToggleKey")},
         {HotkeyAction::CycleTrackingMode, Parse(cfg.cycle_tracking_mode_key_name, "CycleTrackingModeKey")},
         {HotkeyAction::YawMode, Parse(cfg.yaw_mode_key_name, "YawModeKey")},
+        {HotkeyAction::TrueFreeLook, Parse(cfg.true_free_look_key_name, "TrueFreeLookKey")},
     };
 }
 

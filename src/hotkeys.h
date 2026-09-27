@@ -7,7 +7,7 @@
 
 namespace FarCry6HeadTracking {
 
-// Registers the three key lists of the settings file on the hotkey thread.
+// Registers the four key lists of the settings file on the hotkey thread.
 void StartHotkeys(const Config& cfg);
 void StopHotkeys();
 

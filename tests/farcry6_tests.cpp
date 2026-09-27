@@ -306,8 +306,24 @@ void TestLegacyDefaultsMapToTheDefaults() {
           "the old defaults map to the defaults");
     Check(mapped.toggle_key_name == "End, Ctrl+Shift+Y" &&
               mapped.cycle_tracking_mode_key_name == "PageUp, Ctrl+Shift+G" &&
-              mapped.yaw_mode_key_name == "PageDown, Ctrl+Shift+H",
+              mapped.yaw_mode_key_name == "PageDown, Ctrl+Shift+H" &&
+              mapped.true_free_look_key_name == "Insert, Ctrl+Shift+U",
           "the old hotkeys and their always-on chords become the fleet's key lists");
+    Check(!mapped.true_free_look, "an upgrade starts sights locked");
+
+    // An old file that put the yaw mode on Insert keeps it there, and the free look toggle
+    // gets only its chord, so one key never fires two actions.
+    legacy::Config yawOnInsert;
+    yawOnInsert.vk_yaw_mode = 0x2D;
+    Config onInsert = table.defaults();
+    const auto insertResult = MapLegacyConfig(legacy::ReadStatus::Read, yawOnInsert, onInsert);
+    Check(onInsert.yaw_mode_key_name == "Insert, Ctrl+Shift+H" && onInsert.true_free_look_key_name == "Ctrl+Shift+U",
+          "Insert already taken leaves the free look toggle on its chord alone");
+    bool follows = false;
+    for (const auto id : insertResult.follows_defaults_ini) {
+        if (id == cameraunlock::config::schema::Concept::TrueFreeLookKey) follows = true;
+    }
+    Check(!follows, "that free look key list is written for this game, not left to Defaults.ini");
 }
 
 std::vector<std::string> Lines(const std::string& bytes) {
@@ -380,9 +396,15 @@ void TestTogglesSave() {
                   c.position_enabled = channels.position_enabled;
               }).status == ConfigSaveStatus::Saved,
               "the tracking mode saves");
-        Check(ChangedLines(afterYaw, ReadBytes(path)) ==
+        const std::string afterMode = ReadBytes(path);
+        Check(ChangedLines(afterYaw, afterMode) ==
                   std::vector<std::string>{"RotationEnabled=true", "PositionEnabled=false"},
               "saving rotation only writes both rows of the tracking mode and nothing else");
+
+        Check(owner.Save([](Config& c) { c.true_free_look = true; }).status == ConfigSaveStatus::Saved,
+              "true free look saves");
+        Check(ChangedLines(afterMode, ReadBytes(path)) == std::vector<std::string>{"TrueFreeLook=true"},
+              "saving true free look writes its value over default and changes nothing else");
 
         bool refused = false;
         try {
@@ -398,9 +420,21 @@ void TestTogglesSave() {
     const auto again = reopened.Load();
     Check(again.status == ConfigLoadStatus::Canonical && again.diagnostics.empty() &&
               !again.config.world_space_yaw && again.config.rotation_enabled && !again.config.position_enabled &&
-              again.config.enable_on_startup,
-          "the saved yaw and tracking mode come back at the next start");
+              again.config.true_free_look && again.config.enable_on_startup,
+          "the saved yaw, tracking mode and true free look come back at the next start");
     Check(ReadBytes(defaults) == defaultsBytes, "a start never changes an existing Defaults.ini");
+
+    // A file that still carries the retired ADS mode loads, and the old value never turns
+    // into true free look.
+    {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        const std::string bytes = committed + "AdsMode=tracked\r\n";
+        file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+    ConfigOwner<Config> withAdsMode(ConfigOwnerOptionsFor(dir, DefaultsFile::At(defaults)));
+    const auto ads = withAdsMode.Load();
+    Check(ads.status == ConfigLoadStatus::Canonical && !ads.config.true_free_look,
+          "a file carrying AdsMode loads with true free look off");
 
     DeleteFileW(path.c_str());
     DeleteFileW(defaults.c_str());
@@ -630,7 +664,7 @@ void TestAdsLeanEasing() {
     AdsLean ads;
     const tobii::Transformation head = HeadPose(20.0f, -10.0f, 15.0f, 30.0f, -20.0f, 40.0f);
 
-    const tobii::Transformation hip = ads.Apply(false, head, 1000);
+    const tobii::Transformation hip = ads.Apply(false, false, head, 1000);
     CheckNear(hip.rotation.yaw_degrees, 20.0f, "at the hip yaw passes through");
     CheckNear(hip.rotation.pitch_degrees, -10.0f, "at the hip pitch passes through");
     CheckNear(hip.rotation.roll_degrees, 15.0f, "at the hip roll passes through");
@@ -638,9 +672,9 @@ void TestAdsLeanEasing() {
     CheckNear(hip.position.y, -20.0f, "at the hip the lean passes through (y)");
     CheckNear(hip.position.z, 40.0f, "at the hip the lean passes through (z)");
 
-    ads.Apply(true, head, 1001);
+    ads.Apply(true, false, head, 1001);
     const unsigned long long up = 1001 + AdsFade::kLowerMs + 1;
-    const tobii::Transformation aimed = ads.Apply(true, head, up);
+    const tobii::Transformation aimed = ads.Apply(true, false, head, up);
     CheckNear(aimed.rotation.yaw_degrees, 20.0f, "with the sights up yaw is untouched");
     CheckNear(aimed.rotation.pitch_degrees, -10.0f, "with the sights up pitch is untouched");
     CheckNear(aimed.rotation.roll_degrees, 15.0f, "with the sights up roll is untouched");
@@ -649,9 +683,9 @@ void TestAdsLeanEasing() {
     CheckNear(aimed.position.z, 0.0f, "with the sights up the lean is out (z)");
 
     AdsLean mid;
-    mid.Apply(false, head, 0);
-    mid.Apply(true, head, 1);
-    const tobii::Transformation half = mid.Apply(true, head, 1 + AdsFade::kLowerMs / 2);
+    mid.Apply(false, false, head, 0);
+    mid.Apply(true, false, head, 1);
+    const tobii::Transformation half = mid.Apply(true, false, head, 1 + AdsFade::kLowerMs / 2);
     Check(half.position.z > 0.0f && half.position.z < 40.0f,
           "mid-transition the lean is part way out");
     CheckNear(half.position.x / 30.0f, half.position.z / 40.0f,
@@ -661,12 +695,46 @@ void TestAdsLeanEasing() {
 
     // Lowering the sights halfway down continues from where the lean is.
     const tobii::Transformation reversed =
-        mid.Apply(false, head, 2 + AdsFade::kLowerMs / 2);
+        mid.Apply(false, false, head, 2 + AdsFade::kLowerMs / 2);
     Check(std::fabs(reversed.position.z - half.position.z) < 2.0f,
           "a reversal mid-transition does not step the lean");
     const tobii::Transformation back =
-        mid.Apply(false, head, 2 + AdsFade::kLowerMs / 2 + AdsFade::kRaiseMs + 1);
+        mid.Apply(false, false, head, 2 + AdsFade::kLowerMs / 2 + AdsFade::kRaiseMs + 1);
     CheckNear(back.position.z, 40.0f, "lowering the sights returns the lean");
+}
+
+// True free look keeps the lean through the aim, and toggling mid-aim rides the same fade.
+void TestTrueFreeLook() {
+    using cameraunlock::ads::AdsFade;
+    const tobii::Transformation head = HeadPose(20.0f, -10.0f, 15.0f, 30.0f, -20.0f, 40.0f);
+
+    AdsLean ads;
+    ads.Apply(false, true, head, 0);
+    const tobii::Transformation aimed = ads.Apply(true, true, head, 1 + AdsFade::kLowerMs + 1);
+    CheckNear(aimed.rotation.yaw_degrees, 20.0f, "true free look, sights up: yaw passes through");
+    CheckNear(aimed.rotation.roll_degrees, 15.0f, "true free look, sights up: roll passes through");
+    CheckNear(aimed.position.x, 30.0f, "true free look, sights up: the lean stays (x)");
+    CheckNear(aimed.position.y, -20.0f, "true free look, sights up: the lean stays (y)");
+    CheckNear(aimed.position.z, 40.0f, "true free look, sights up: the lean stays (z)");
+
+    const tobii::Transformation hip = ads.Apply(false, true, head, 2 + AdsFade::kLowerMs + 1);
+    CheckNear(hip.position.z, 40.0f, "true free look at the hip: the lean passes through");
+
+    // Sights up in true free look, then back to sights locked mid-aim: the lean slides out.
+    AdsLean toggled;
+    toggled.Apply(true, true, head, 0);
+    toggled.Apply(true, false, head, 1);
+    const tobii::Transformation sliding = toggled.Apply(true, false, head, 1 + AdsFade::kLowerMs / 2);
+    Check(sliding.position.z > 0.0f && sliding.position.z < 40.0f,
+          "switching to sights locked mid-aim eases the lean out rather than stepping");
+    CheckNear(sliding.rotation.yaw_degrees, 20.0f, "the switch leaves rotation untouched");
+    const tobii::Transformation reversed = toggled.Apply(true, true, head, 2 + AdsFade::kLowerMs / 2);
+    Check(std::fabs(reversed.position.z - sliding.position.z) < 2.0f,
+          "switching back mid-transition continues from where the lean is");
+    const unsigned long long lockedAt = 3 + AdsFade::kLowerMs / 2 + AdsFade::kRaiseMs;
+    toggled.Apply(true, false, head, lockedAt);
+    const tobii::Transformation locked = toggled.Apply(true, false, head, lockedAt + AdsFade::kLowerMs + 1);
+    CheckNear(locked.position.z, 0.0f, "sights locked with the sights up leaves no lean");
 }
 
 // The zoom factor shrinks what moves the picture across the frame and leaves roll.
@@ -720,6 +788,7 @@ int main(int argc, char** argv) {
     TestUdpPortRecovery();
     TestWindowCentring();
     TestAdsLeanEasing();
+    TestTrueFreeLook();
     TestZoomScaling();
 
     if (g_failures == 0) {

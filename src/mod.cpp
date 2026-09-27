@@ -101,6 +101,8 @@ bool Mod::LoadConfiguration() {
 
     m_worldSpaceYaw.store(m_cfg.world_space_yaw, std::memory_order_relaxed);
     Log::Line("Yaw mode: %s", m_cfg.world_space_yaw ? "world" : "camera-local");
+    m_trueFreeLook.store(m_cfg.true_free_look, std::memory_order_relaxed);
+    Log::Line("True free look: %s", m_cfg.true_free_look ? "ON" : "OFF (sights locked)");
     Log::Line("Port %d, enable on startup %s, rotation %s, position %s, disable in co-op %s",
               m_cfg.udp_port,
               m_cfg.enable_on_startup ? "yes" : "no",
@@ -232,6 +234,13 @@ void Mod::ToggleYawMode() {
     m_worldSpaceYaw.store(world, std::memory_order_relaxed);
     Log::Line("Yaw mode: %s", world ? "world" : "camera-local");
     Save([world](Config& c) { c.world_space_yaw = world; });
+}
+
+void Mod::ToggleTrueFreeLook() {
+    const bool on = !TrueFreeLook();
+    m_trueFreeLook.store(on, std::memory_order_relaxed);
+    Log::Line("True free look: %s", on ? "ON" : "OFF (sights locked)");
+    Save([on](Config& c) { c.true_free_look = on; });
 }
 
 void Mod::CycleTrackingMode() {

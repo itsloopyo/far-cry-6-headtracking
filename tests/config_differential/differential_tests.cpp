@@ -152,7 +152,7 @@ std::wstring MakeFolder(const std::wstring& parent, const wchar_t* name) {
 // Startup state: what each build does with its Config
 // ---------------------------------------------------------------------------
 
-enum class Action { Toggle, CycleMode, YawMode, AdsMode };
+enum class Action { Toggle, CycleMode, YawMode, AdsMode, TrueFreeLook };
 
 const char* ActionName(Action a) {
     switch (a) {
@@ -160,6 +160,7 @@ const char* ActionName(Action a) {
         case Action::CycleMode: return "cycle mode";
         case Action::YawMode: return "yaw mode";
         case Action::AdsMode: return "ADS mode";
+        case Action::TrueFreeLook: return "true free look";
     }
     throw std::logic_error("action");
 }
@@ -417,6 +418,7 @@ struct Startup {
     uint32_t limit_z_back = 0;
     bool light_follows_head = false;
     uint32_t light_multiplier = 0;
+    bool true_free_look = false;
     bool collision_enabled = false;
     uint32_t collision_margin = 0;
     uint32_t collision_release_smoothing = 0;
@@ -429,6 +431,8 @@ struct Startup {
 // the flashlight always followed the head at kHeadlightHeadScale = 1.5f (src/headlight.cpp at
 // 5ea3ff9), and the lean's wall check always ran with a 0.10 margin, 0.9 release smoothing and
 // the 0x2dbf layer mask (src/camera_adapter.cpp at v0.1.0 and 5ea3ff9). No setting reached either.
+// It had no true free look: the import starts sights locked, with the toggle on Insert unless an
+// older action already has that key, and on Ctrl+Shift+U.
 Startup FromImport(const legacy::Config& c) {
     Startup s;
     s.port = c.udp_port;
@@ -450,6 +454,12 @@ Startup FromImport(const legacy::Config& c) {
     s.collision_release_smoothing = Bits(0.9f);
     s.collision_mask = 0x2dbf;
     s.hotkeys = ImportHotkeys(c);
+    s.true_free_look = false;
+    const bool insertTaken = std::any_of(s.hotkeys.begin(), s.hotkeys.end(),
+                                         [](const Registration& r) { return r.vk == VK_INSERT && r.modifiers == kNav; });
+    if (!insertTaken) s.hotkeys.push_back({Action::TrueFreeLook, VK_INSERT, kNav});
+    s.hotkeys.push_back({Action::TrueFreeLook, 'U', kChord});
+    std::sort(s.hotkeys.begin(), s.hotkeys.end());
     return s;
 }
 
@@ -458,6 +468,7 @@ Action ActionOf(FarCry6HeadTracking::HotkeyAction a) {
         case FarCry6HeadTracking::HotkeyAction::Toggle: return Action::Toggle;
         case FarCry6HeadTracking::HotkeyAction::CycleTrackingMode: return Action::CycleMode;
         case FarCry6HeadTracking::HotkeyAction::YawMode: return Action::YawMode;
+        case FarCry6HeadTracking::HotkeyAction::TrueFreeLook: return Action::TrueFreeLook;
     }
     throw std::logic_error("hotkey action");
 }
@@ -480,6 +491,7 @@ Startup FromMigration(const Config& c) {
     s.limit_z_back = Bits(c.position.limit_z_back);
     s.light_follows_head = c.light.follows_head;
     s.light_multiplier = Bits(c.light.multiplier);
+    s.true_free_look = c.true_free_look;
     s.collision_enabled = c.collision_enabled;
     s.collision_margin = Bits(c.lean_clamp.skin);
     s.collision_release_smoothing = Bits(c.lean_clamp.release_smoothing);
@@ -511,6 +523,7 @@ std::vector<std::string> StartupDifferences(const Startup& a, const Startup& b) 
     SAME(limit_z_back);
     SAME(light_follows_head);
     SAME(light_multiplier);
+    SAME(true_free_look);
     SAME(collision_enabled);
     SAME(collision_margin);
     SAME(collision_release_smoothing);
@@ -534,7 +547,7 @@ const std::set<Concept>& AllRows() {
         Concept::PositionLimitYDown, Concept::PositionLimitZ,   Concept::PositionLimitZBack,
         Concept::CollisionEnabled, Concept::CollisionReleaseSmoothing, Concept::ToggleKey,
         Concept::CycleTrackingModeKey, Concept::YawModeKey,     Concept::LightFollowsHead,
-        Concept::LightMultiplier,
+        Concept::LightMultiplier,  Concept::TrueFreeLook,       Concept::TrueFreeLookKey,
     };
     return all;
 }
@@ -544,6 +557,7 @@ Concept RowOf(Action a) {
         case Action::Toggle: return Concept::ToggleKey;
         case Action::CycleMode: return Concept::CycleTrackingModeKey;
         case Action::YawMode: return Concept::YawModeKey;
+        case Action::TrueFreeLook: return Concept::TrueFreeLookKey;
         case Action::AdsMode: break;
     }
     throw std::logic_error("no row holds the ADS mode key");
@@ -574,6 +588,7 @@ void ForEachRowField(Startup& a, const Startup& b, Visit visit) {
     visit(Concept::CollisionReleaseSmoothing, a.collision_release_smoothing, b.collision_release_smoothing);
     visit(Concept::LightFollowsHead, a.light_follows_head, b.light_follows_head);
     visit(Concept::LightMultiplier, a.light_multiplier, b.light_multiplier);
+    visit(Concept::TrueFreeLook, a.true_free_look, b.true_free_look);
 }
 
 // The rows the player never changed: the frozen reader's startup state matches the no-file
@@ -584,7 +599,7 @@ std::set<Concept> UntouchedRows(const Startup& imported, const Startup& shipped)
     ForEachRowField(a, shipped, [&changed](Concept row, const auto& x, const auto& y) {
         if (x != y) changed.insert(row);
     });
-    for (const Action action : {Action::Toggle, Action::CycleMode, Action::YawMode}) {
+    for (const Action action : {Action::Toggle, Action::CycleMode, Action::YawMode, Action::TrueFreeLook}) {
         if (HotkeysOf(imported, action) != HotkeysOf(shipped, action)) changed.insert(RowOf(action));
     }
     if (changed.count(Concept::RotationEnabled)) changed.insert(Concept::PositionEnabled);
@@ -610,7 +625,7 @@ Startup OverDefaults(Startup want, const std::set<Concept>& follows, const Start
         if (follows.count(row)) x = y;
     });
     std::vector<Registration> hotkeys;
-    for (const Action action : {Action::Toggle, Action::CycleMode, Action::YawMode}) {
+    for (const Action action : {Action::Toggle, Action::CycleMode, Action::YawMode, Action::TrueFreeLook}) {
         const std::vector<Registration> from = HotkeysOf(follows.count(RowOf(action)) ? defaults : want, action);
         hotkeys.insert(hotkeys.end(), from.begin(), from.end());
     }
@@ -702,8 +717,8 @@ const char kEditedDefaults[] =
     "[Smoothing]\r\nLocalSmoothing=0.5\r\nRemoteSmoothing=0.4\r\n\r\n"
     "[Position]\r\nPositionEnabled=false\r\nPositionLimitX=0.5\r\nPositionLimitY=0.25\r\n"
     "PositionLimitYDown=0.15\r\nPositionLimitZ=0.3\r\nPositionLimitZBack=0.05\r\n"
-    "CollisionEnabled=false\r\nCollisionReleaseSmoothing=0.5\r\n\r\n"
-    "[Hotkeys]\r\nToggleKey=F8\r\nCycleTrackingModeKey=F9\r\nYawModeKey=F10\r\n\r\n"
+    "TrueFreeLook=true\r\nCollisionEnabled=false\r\nCollisionReleaseSmoothing=0.5\r\n\r\n"
+    "[Hotkeys]\r\nToggleKey=F8\r\nCycleTrackingModeKey=F9\r\nYawModeKey=F10\r\nTrueFreeLookKey=F11\r\n\r\n"
     "[Light]\r\nLightFollowsHead=false\r\nLightMultiplier=1.0\r\n";
 
 // What the edited Defaults.ini starts the mod with, read with no legacy file.
@@ -960,7 +975,8 @@ int main() {
                 c.position_enabled || c.local_smoothing != 0.5f || c.remote_smoothing != 0.4f ||
                 c.position.limit_x != 0.5f || c.position.limit_y != 0.25f || c.position.limit_y_down != 0.15f ||
                 c.position.limit_z != 0.3f || c.position.limit_z_back != 0.05f || c.toggle_key_name != "F8" ||
-                c.cycle_tracking_mode_key_name != "F9" || c.yaw_mode_key_name != "F10" || c.light.follows_head ||
+                c.cycle_tracking_mode_key_name != "F9" || c.yaw_mode_key_name != "F10" ||
+                c.true_free_look_key_name != "F11" || !c.true_free_look || c.light.follows_head ||
                 c.light.multiplier != 1.0f || c.collision_enabled || c.lean_clamp.release_smoothing != 0.5f) {
                 Fail("Defaults.ini", "the edited Defaults.ini does not reach every row it names");
             }

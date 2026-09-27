@@ -11,14 +11,14 @@
 
 namespace FarCry6HeadTracking {
 
-enum class HotkeyAction { Toggle, CycleTrackingMode, YawMode };
+enum class HotkeyAction { Toggle, CycleTrackingMode, YawMode, TrueFreeLook };
 
 struct HotkeyList {
     HotkeyAction action;
     std::vector<cameraunlock::input::KeyBinding> bindings;
 };
 
-// The three key lists of the settings file, parsed, as StartHotkeys puts them on the poller.
+// The four key lists of the settings file, parsed, as StartHotkeys puts them on the poller.
 std::vector<HotkeyList> HotkeyLists(const Config& cfg);
 
 }  // namespace FarCry6HeadTracking

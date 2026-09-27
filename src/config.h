@@ -44,8 +44,8 @@ struct Config : cameraunlock::HeadTrackingConfig {
     bool disable_in_coop = true;
 };
 
-// Every row of the settings file. WorldSpaceYaw and the tracking-mode pair are the rows
-// the hotkeys save.
+// Every row of the settings file. WorldSpaceYaw, the tracking-mode pair and TrueFreeLook are
+// the rows the hotkeys save.
 cameraunlock::config::ConfigTable<Config> ConfigTable();
 
 // Reads a pre-canonical file through the frozen reader in legacy_config/, then maps it.

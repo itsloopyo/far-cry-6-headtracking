@@ -49,10 +49,12 @@ public:
     bool TrackingAllowed() const;
 
     bool WorldSpaceYaw() const { return m_worldSpaceYaw.load(std::memory_order_relaxed); }
+    bool TrueFreeLook() const { return m_trueFreeLook.load(std::memory_order_relaxed); }
 
-    // Both switch the mode and then save it, from the hotkey thread.
+    // Each switches the mode and then saves it, from the hotkey thread.
     void ToggleYawMode();
     void CycleTrackingMode();
+    void ToggleTrueFreeLook();
 
     void OpenLog();
 
@@ -79,6 +81,7 @@ private:
     std::atomic<bool> m_inCoop{false};
     std::atomic<bool> m_coopGateActive{false};
     std::atomic<bool> m_worldSpaceYaw{true};
+    std::atomic<bool> m_trueFreeLook{false};
     std::optional<cameraunlock::config::ConfigOwner<Config>> m_owner;
     Config m_cfg{};
     TrackingRuntime m_runtime;

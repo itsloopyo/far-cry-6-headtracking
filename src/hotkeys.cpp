@@ -30,6 +30,7 @@ std::function<void()> ActionFor(HotkeyAction action) {
         case HotkeyAction::Toggle: return []() { Mod::Instance().Runtime().ToggleEnabled(); };
         case HotkeyAction::CycleTrackingMode: return []() { Mod::Instance().CycleTrackingMode(); };
         case HotkeyAction::YawMode: return []() { Mod::Instance().ToggleYawMode(); };
+        case HotkeyAction::TrueFreeLook: return []() { Mod::Instance().ToggleTrueFreeLook(); };
     }
     throw std::logic_error("unknown hotkey action");
 }
@@ -61,9 +62,9 @@ void StartHotkeys(const Config& cfg) {
         return;
     }
 
-    Log::Line("Hotkeys: ToggleKey=%s, CycleTrackingModeKey=%s, YawModeKey=%s",
+    Log::Line("Hotkeys: ToggleKey=%s, CycleTrackingModeKey=%s, YawModeKey=%s, TrueFreeLookKey=%s",
               cfg.toggle_key_name.c_str(), cfg.cycle_tracking_mode_key_name.c_str(),
-              cfg.yaw_mode_key_name.c_str());
+              cfg.yaw_mode_key_name.c_str(), cfg.true_free_look_key_name.c_str());
     g_started = true;
 }
 
