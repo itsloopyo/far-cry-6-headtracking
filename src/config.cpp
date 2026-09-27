@@ -18,16 +18,28 @@ namespace {
 
 namespace cfg = cameraunlock::config;
 using cameraunlock::input::FormatKeyBindings;
-using cameraunlock::input::KeyBinding;
 using cameraunlock::input::KeyModifiers;
 
 // A legacy action's key list: its own key where the old build bound it, then the
 // Ctrl+Shift chord it always registered beside it.
-std::string KeyList(const int* vk, char chordLetter) {
-    std::vector<KeyBinding> bindings;
-    if (vk != nullptr) bindings.push_back({KeyModifiers::kNone, *vk});
-    bindings.push_back({KeyModifiers::kCtrl | KeyModifiers::kShift, chordLetter});
-    return FormatKeyBindings(bindings);
+std::string KeyList(int vk, const char* key, char chordLetter, std::vector<cfg::DroppedValue>& dropped) {
+    const std::string own = cfg::LegacyVirtualKeyToBindings(vk, "Hotkeys", key, dropped);
+    const std::string chord = FormatKeyBindings({{KeyModifiers::kCtrl | KeyModifiers::kShift, chordLetter}});
+    return own.empty() ? chord : own + ", " + chord;
+}
+
+// The key each action registered, 0 where the old build left it unbound because an
+// earlier action already had that key.
+struct LegacyHotkeyCodes {
+    int toggle;
+    int cycle_mode;
+    int yaw_mode;
+};
+
+LegacyHotkeyCodes EffectiveHotkeys(const legacy::Config& read) {
+    const bool cycleKeyBound = read.vk_cycle_mode != read.vk_toggle;
+    const bool yawKeyBound = read.vk_yaw_mode != read.vk_toggle && read.vk_yaw_mode != read.vk_cycle_mode;
+    return {read.vk_toggle, cycleKeyBound ? read.vk_cycle_mode : 0, yawKeyBound ? read.vk_yaw_mode : 0};
 }
 
 }  // namespace
@@ -109,16 +121,40 @@ cfg::ImportResult MapLegacyConfig(legacy::ReadStatus status, const legacy::Confi
     out.lean_clamp.release_smoothing = 0.9f;
     out.collision_channel = kCollisionLayerMask;
 
-    // The old build left a key another action already had unbound for the later
-    // action, so the list carries only its chord there.
-    out.toggle_key_name = KeyList(&read.vk_toggle, 'Y');
-    const bool cycleKeyBound = read.vk_cycle_mode != read.vk_toggle;
-    out.cycle_tracking_mode_key_name = KeyList(cycleKeyBound ? &read.vk_cycle_mode : nullptr, 'G');
-    const bool yawKeyBound = read.vk_yaw_mode != read.vk_toggle && read.vk_yaw_mode != read.vk_cycle_mode;
-    out.yaw_mode_key_name = KeyList(yawKeyBound ? &read.vk_yaw_mode : nullptr, 'H');
+    const LegacyHotkeyCodes keys = EffectiveHotkeys(read);
+    out.toggle_key_name = KeyList(keys.toggle, "Toggle", 'Y', dropped);
+    out.cycle_tracking_mode_key_name = KeyList(keys.cycle_mode, "CycleMode", 'G', dropped);
+    out.yaw_mode_key_name = KeyList(keys.yaw_mode, "YawMode", 'H', dropped);
 
-    return status == legacy::ReadStatus::Absent ? cfg::ImportResult::Absent(std::move(dropped), std::move(shaping))
-                                                : cfg::ImportResult::Imported(std::move(dropped), std::move(shaping));
+    // A setting the player never changed from what the old build wrote on its first start
+    // follows Defaults.ini. LimitY stood for both vertical bounds, and the lean's wall check
+    // and the flashlight had no setting at all.
+    using C = cfg::schema::Concept;
+    const legacy::Config shipped;
+    const LegacyHotkeyCodes shippedKeys = EffectiveHotkeys(shipped);
+    cfg::LegacyFollowsDefaultsIni follows;
+    follows.Setting(C::UdpPort, read.udp_port, shipped.udp_port);
+    follows.Setting(C::EnableOnStartup, read.enabled_on_startup, shipped.enabled_on_startup);
+    follows.Setting(C::WorldSpaceYaw, read.world_space_yaw, shipped.world_space_yaw);
+    follows.TrackingMode(read.position_enabled, shipped.position_enabled);
+    follows.Setting(C::LocalSmoothing, read.local_smoothing, shipped.local_smoothing);
+    follows.Setting(C::RemoteSmoothing, read.remote_smoothing, shipped.remote_smoothing);
+    follows.Setting(C::PositionLimitX, read.pos_limit_x, shipped.pos_limit_x);
+    follows.Setting(C::PositionLimitY, read.pos_limit_y, shipped.pos_limit_y);
+    follows.Setting(C::PositionLimitYDown, read.pos_limit_y, shipped.pos_limit_y);
+    follows.Setting(C::PositionLimitZ, read.pos_limit_z, shipped.pos_limit_z);
+    follows.Setting(C::PositionLimitZBack, read.pos_limit_z_back, shipped.pos_limit_z_back);
+    follows.NotInLegacy(C::CollisionEnabled);
+    follows.NotInLegacy(C::CollisionReleaseSmoothing);
+    follows.Setting(C::ToggleKey, keys.toggle, shippedKeys.toggle);
+    follows.Setting(C::CycleTrackingModeKey, keys.cycle_mode, shippedKeys.cycle_mode);
+    follows.Setting(C::YawModeKey, keys.yaw_mode, shippedKeys.yaw_mode);
+    follows.NotInLegacy(C::LightFollowsHead);
+    follows.NotInLegacy(C::LightMultiplier);
+
+    return status == legacy::ReadStatus::Absent
+               ? cfg::ImportResult::Absent(std::move(dropped), std::move(shaping), follows.Concepts())
+               : cfg::ImportResult::Imported(std::move(dropped), std::move(shaping), follows.Concepts());
 }
 
 cfg::LegacyImport<Config> LegacyConfigImport() {

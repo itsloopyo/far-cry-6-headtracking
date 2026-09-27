@@ -16,10 +16,20 @@
 // Comparison 2, import against migration, is the proof for the migration: no difference but
 // a sensitivity or axis inversion the player set away from its shipped identity value, which
 // the import must list as pose shaping and drop (approved change pose_shaping). No default
-// moved, so the no-file input has no difference either. Every input migrates twice, over a
-// Defaults.ini at the built-in values and over one holding other values on every row the
-// game takes from it, since the migration writes `default` where the imported value equals
-// what Defaults.ini gives: the player runs on what the old build ran on either way.
+// moved, so the no-file input has no difference either.
+//
+// A row the player never changed from what the old build wrote on its first start follows
+// Defaults.ini: the import lists it in follows_defaults_ini and the migration writes it
+// `default`, the tracking mode pair as one unit. The test derives the untouched rows from what
+// the frozen reader read, comparing the startup state with the no-file one row by row, and
+// holds the import's list to them on every input. Every file a published build wrote and the
+// empty file leave every row to Defaults.ini.
+//
+// Every input migrates three times: over a Defaults.ini at the built-in values, from a
+// read-only legacy file, and over a Defaults.ini holding other values on every row the game
+// takes from it. Over the first two the player runs on what the old build ran on, since its
+// defaults are the built-in values. Over the third an untouched row is written `default` and
+// takes Defaults.ini's value, and a changed row keeps the player's.
 //
 // The distinct migrated files are written beside the executable under migrated\, for
 // lint-migrated.mjs to run core's canonical config lint over.
@@ -70,6 +80,7 @@ using cameraunlock::config::testing::GenerateIniMutations;
 using cameraunlock::config::testing::IniMutation;
 using cameraunlock::config::testing::MutationKey;
 using cameraunlock::input::KeyModifiers;
+using Concept = cfg::schema::Concept;
 
 int g_failures = 0;
 
@@ -509,6 +520,105 @@ std::vector<std::string> StartupDifferences(const Startup& a, const Startup& b) 
     return out;
 }
 
+// ---------------------------------------------------------------------------
+// Rows that follow Defaults.ini
+// ---------------------------------------------------------------------------
+
+// Every row of the table that follows Defaults.ini: all but CollisionMargin and
+// CollisionChannel, which every game keeps for itself, and the local DisableInCoop.
+const std::set<Concept>& AllRows() {
+    static const std::set<Concept> all = {
+        Concept::UdpPort,          Concept::EnableOnStartup,    Concept::WorldSpaceYaw,
+        Concept::RotationEnabled,  Concept::PositionEnabled,    Concept::LocalSmoothing,
+        Concept::RemoteSmoothing,  Concept::PositionLimitX,     Concept::PositionLimitY,
+        Concept::PositionLimitYDown, Concept::PositionLimitZ,   Concept::PositionLimitZBack,
+        Concept::CollisionEnabled, Concept::CollisionReleaseSmoothing, Concept::ToggleKey,
+        Concept::CycleTrackingModeKey, Concept::YawModeKey,     Concept::LightFollowsHead,
+        Concept::LightMultiplier,
+    };
+    return all;
+}
+
+Concept RowOf(Action a) {
+    switch (a) {
+        case Action::Toggle: return Concept::ToggleKey;
+        case Action::CycleMode: return Concept::CycleTrackingModeKey;
+        case Action::YawMode: return Concept::YawModeKey;
+        case Action::AdsMode: break;
+    }
+    throw std::logic_error("no row holds the ADS mode key");
+}
+
+std::vector<Registration> HotkeysOf(const Startup& s, Action a) {
+    std::vector<Registration> out;
+    std::copy_if(s.hotkeys.begin(), s.hotkeys.end(), std::back_inserter(out),
+                 [a](const Registration& r) { return r.action == a; });
+    return out;
+}
+
+// Each Startup field with the row it belongs to. The mode stands for the tracking mode pair.
+template <class Visit>
+void ForEachRowField(Startup& a, const Startup& b, Visit visit) {
+    visit(Concept::UdpPort, a.port, b.port);
+    visit(Concept::EnableOnStartup, a.enabled, b.enabled);
+    visit(Concept::WorldSpaceYaw, a.world_yaw, b.world_yaw);
+    visit(Concept::RotationEnabled, a.mode, b.mode);
+    visit(Concept::LocalSmoothing, a.local_smoothing, b.local_smoothing);
+    visit(Concept::RemoteSmoothing, a.remote_smoothing, b.remote_smoothing);
+    visit(Concept::PositionLimitX, a.limit_x, b.limit_x);
+    visit(Concept::PositionLimitY, a.limit_y, b.limit_y);
+    visit(Concept::PositionLimitYDown, a.limit_y_down, b.limit_y_down);
+    visit(Concept::PositionLimitZ, a.limit_z, b.limit_z);
+    visit(Concept::PositionLimitZBack, a.limit_z_back, b.limit_z_back);
+    visit(Concept::CollisionEnabled, a.collision_enabled, b.collision_enabled);
+    visit(Concept::CollisionReleaseSmoothing, a.collision_release_smoothing, b.collision_release_smoothing);
+    visit(Concept::LightFollowsHead, a.light_follows_head, b.light_follows_head);
+    visit(Concept::LightMultiplier, a.light_multiplier, b.light_multiplier);
+}
+
+// The rows the player never changed: the frozen reader's startup state matches the no-file
+// one on every field of the row. The mode pair is both rows or neither.
+std::set<Concept> UntouchedRows(const Startup& imported, const Startup& shipped) {
+    std::set<Concept> changed;
+    Startup a = imported;
+    ForEachRowField(a, shipped, [&changed](Concept row, const auto& x, const auto& y) {
+        if (x != y) changed.insert(row);
+    });
+    for (const Action action : {Action::Toggle, Action::CycleMode, Action::YawMode}) {
+        if (HotkeysOf(imported, action) != HotkeysOf(shipped, action)) changed.insert(RowOf(action));
+    }
+    if (changed.count(Concept::RotationEnabled)) changed.insert(Concept::PositionEnabled);
+    std::set<Concept> untouched;
+    for (const Concept row : AllRows()) {
+        if (!changed.count(row)) untouched.insert(row);
+    }
+    return untouched;
+}
+
+std::string Names(const std::set<Concept>& rows) {
+    std::string text;
+    for (const Concept row : rows) {
+        text += (text.empty() ? "" : ", ") + std::string(cfg::schema::kConcepts[static_cast<std::size_t>(row)].name);
+    }
+    return text.empty() ? "none" : text;
+}
+
+// What the player runs on over a Defaults.ini other than the built-in one: the import's
+// startup state, with each row the import left to Defaults.ini as that file gives it.
+Startup OverDefaults(Startup want, const std::set<Concept>& follows, const Startup& defaults) {
+    ForEachRowField(want, defaults, [&follows](Concept row, auto& x, const auto& y) {
+        if (follows.count(row)) x = y;
+    });
+    std::vector<Registration> hotkeys;
+    for (const Action action : {Action::Toggle, Action::CycleMode, Action::YawMode}) {
+        const std::vector<Registration> from = HotkeysOf(follows.count(RowOf(action)) ? defaults : want, action);
+        hotkeys.insert(hotkeys.end(), from.begin(), from.end());
+    }
+    std::sort(hotkeys.begin(), hotkeys.end());
+    want.hotkeys = hotkeys;
+    return want;
+}
+
 // The only difference comparison 2 allows: every sensitivity and inversion the frozen
 // reader read is listed, folded where it holds the shipped identity value, and dropped as
 // PoseShaping where it does not. Nothing else is dropped.
@@ -560,6 +670,8 @@ struct MigrationTally {
     int refused = 0;
     int with_pose_shaping_dropped = 0;
     int written_as_values = 0;
+    int touched = 0;
+    int mode_touched = 0;
 };
 
 std::string Render(const Config& c) {
@@ -593,6 +705,9 @@ const char kEditedDefaults[] =
     "CollisionEnabled=false\r\nCollisionReleaseSmoothing=0.5\r\n\r\n"
     "[Hotkeys]\r\nToggleKey=F8\r\nCycleTrackingModeKey=F9\r\nYawModeKey=F10\r\n\r\n"
     "[Light]\r\nLightFollowsHead=false\r\nLightMultiplier=1.0\r\n";
+
+// What the edited Defaults.ini starts the mod with, read with no legacy file.
+Startup g_editedDefaults;
 
 std::wstring DefaultsPath(const std::wstring& folder) {
     return folder + L"\\Defaults.ini";
@@ -630,8 +745,8 @@ cfg::ConfigOwnerOptions<Config> OptionsOver(const std::wstring& folder, const st
 // `defaultsFolder`, with the legacy file read-only when asked. Returns the bytes of the new
 // CameraUnlock.ini, or nothing when the load did not migrate.
 std::optional<std::string> MigrateOnce(const Folders& f, const std::string& name, const std::string& bytes,
-                                       const ImportRun& i, const std::wstring& defaultsFolder, bool readOnly,
-                                       MigrationTally& tally) {
+                                       const ImportRun& i, const Startup& expected,
+                                       const std::wstring& defaultsFolder, bool readOnly, MigrationTally& tally) {
     using cfg::ConfigLoadStatus;
     EmptyFolder(f.migration);
     const std::wstring legacyPath = f.migration + L"\\" + kIniName;
@@ -662,7 +777,7 @@ std::optional<std::string> MigrateOnce(const Folders& f, const std::string& name
         return std::nullopt;
     }
     const std::string migrated = after.at(kCanonicalName);
-    for (const std::string& d : StartupDifferences(FromImport(i.cfg), FromMigration(loaded.config))) {
+    for (const std::string& d : StartupDifferences(expected, FromMigration(loaded.config))) {
         Fail(name, "comparison 2: " + d);
     }
     tally.migrated.insert(migrated);
@@ -699,15 +814,39 @@ void MigrateInput(const Folders& f, const std::string& name, const std::optional
         return;
     }
 
-    const std::optional<std::string> migrated = MigrateOnce(f, name, *bytes, i, f.built_in, false, tally);
-    const std::optional<std::string> readOnly = MigrateOnce(f, name + ", read-only", *bytes, i, f.built_in, true, tally);
-    const std::optional<std::string> overEdited =
-        MigrateOnce(f, name + ", edited Defaults.ini", *bytes, i, f.edited, false, tally);
+    const Startup imported = FromImport(i.cfg);
+    std::set<Concept> follows;
+    if (ImportUsable(i.status)) {
+        follows.insert(result->follows_defaults_ini.begin(), result->follows_defaults_ini.end());
+        if (follows.size() != result->follows_defaults_ini.size()) Fail(name, "follows_defaults_ini names a row twice");
+        const std::set<Concept> untouched = UntouchedRows(imported, FromImport(legacy::Config{}));
+        if (follows != untouched) {
+            Fail(name, "the import leaves " + Names(follows) + " to Defaults.ini, and the player never changed " +
+                           Names(untouched));
+        }
+        if (untouched != AllRows()) ++tally.touched;
+        if (!untouched.count(Concept::RotationEnabled)) ++tally.mode_touched;
+    }
+
+    const std::optional<std::string> migrated = MigrateOnce(f, name, *bytes, i, imported, f.built_in, false, tally);
+    const std::optional<std::string> readOnly =
+        MigrateOnce(f, name + ", read-only", *bytes, i, imported, f.built_in, true, tally);
+    const std::optional<std::string> overEdited = MigrateOnce(f, name + ", edited Defaults.ini", *bytes, i,
+                                                              OverDefaults(imported, follows, g_editedDefaults),
+                                                              f.edited, false, tally);
     if (!ImportUsable(i.status)) {
         ++tally.refused;
         return;
     }
     ++tally.converted;
+    if (overEdited) {
+        for (const Concept row : follows) {
+            const std::string key = cfg::schema::kConcepts[static_cast<std::size_t>(row)].key;
+            if (overEdited->find("\r\n" + key + "=default\r\n") == std::string::npos) {
+                Fail(name, "an untouched " + key + " is not written default over the edited Defaults.ini");
+            }
+        }
+    }
     if (migrated != readOnly) Fail(name, "a read-only legacy file does not migrate as a writable one does");
     if (migrated && overEdited && *migrated != *overEdited) ++tally.written_as_values;
     tally.with_pose_shaping_dropped += CheckPoseShaping(name, i.cfg, *result) > 0 ? 1 : 0;
@@ -816,6 +955,7 @@ int main() {
             EmptyFolder(folders.migration);
             cfg::ConfigOwner<Config> edited(OptionsOver(folders.migration, folders.edited));
             const Config c = edited.Load().config;
+            g_editedDefaults = FromMigration(c);
             if (c.udp_port != 5000 || c.enable_on_startup || c.world_space_yaw || !c.rotation_enabled ||
                 c.position_enabled || c.local_smoothing != 0.5f || c.remote_smoothing != 0.4f ||
                 c.position.limit_x != 0.5f || c.position.limit_y != 0.25f || c.position.limit_y_down != 0.15f ||
@@ -857,6 +997,22 @@ int main() {
 
         for (const auto& [name, bytes] : inputs) RunInput(folders, name, bytes, tally);
 
+        // Every file a published build wrote, and the empty file, hold no value the player
+        // changed, so every row follows Defaults.ini.
+        for (const auto& [name, bytes] : {std::pair<const char*, std::string>{"empty file", std::string()},
+                                          {"first run, dev dec1791", firstRunDev},
+                                          {"first run, v0.1.0", firstRun}}) {
+            EmptyFolder(folders.import);
+            const std::wstring path = folders.import + L"\\" + kIniName;
+            WriteBytes(path, bytes);
+            Config mapped = FarCry6HeadTracking::ConfigTable().defaults();
+            const cfg::ImportResult result =
+                FarCry6HeadTracking::LegacyConfigImport().run(cfg::LegacyInput{path, Narrow(path), false}, mapped);
+            if (std::set<Concept>(result.follows_defaults_ini.begin(), result.follows_defaults_ini.end()) != AllRows()) {
+                Fail(name, "an unedited file does not leave every row to Defaults.ini");
+            }
+        }
+
         // Fresh equals upgrade: over a Defaults.ini at the built-in values, each published
         // build's first-run output imports into the file a first start creates.
         if (tally.migrated.count(tally.committed) == 0) Fail("first run", "no input migrated to the committed file");
@@ -887,6 +1043,11 @@ int main() {
                     tally.refused, tally.migrated.size());
         if (tally.with_pose_shaping_dropped == 0) Fail("pose shaping", "no input drops a changed value");
         if (tally.written_as_values == 0) Fail("Defaults.ini", "no input migrates differently over the edited Defaults.ini");
+        std::printf("%d inputs changed a row from v0.1.0's first-run value, %d of them the tracking mode\n",
+                    tally.touched, tally.mode_touched);
+        if (tally.touched == 0 || tally.mode_touched == 0) {
+            Fail("Defaults.ini", "no input changes a row, the tracking mode among them, which then keeps its value");
+        }
 
         wchar_t exe[MAX_PATH];
         GetModuleFileNameW(nullptr, exe, MAX_PATH);
