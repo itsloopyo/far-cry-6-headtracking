@@ -106,6 +106,7 @@ try {
     Write-Error $_.Exception.Message
     exit 1
 }
+Assert-ReleaseNotBelowCanonicalSince -RepoRoot $ProjectRoot -Version $target
 
 # --- 2. Preconditions (these stand in for interactive confirmation) ----
 $branch = (git -C $ProjectRoot rev-parse --abbrev-ref HEAD).Trim()
