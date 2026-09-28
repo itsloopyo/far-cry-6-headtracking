@@ -307,7 +307,7 @@ void TestLegacyDefaultsMapToTheDefaults() {
     Check(mapped.toggle_key_name == "End, Ctrl+Shift+Y" &&
               mapped.cycle_tracking_mode_key_name == "PageUp, Ctrl+Shift+G" &&
               mapped.yaw_mode_key_name == "PageDown, Ctrl+Shift+H" &&
-              mapped.true_free_look_key_name == "Insert, Ctrl+Shift+U",
+              mapped.true_free_look_key_name == "Insert, Ctrl+Shift+J",
           "the old hotkeys and their always-on chords become the fleet's key lists");
     Check(!mapped.true_free_look, "an upgrade starts sights locked");
 
@@ -317,7 +317,7 @@ void TestLegacyDefaultsMapToTheDefaults() {
     yawOnInsert.vk_yaw_mode = 0x2D;
     Config onInsert = table.defaults();
     const auto insertResult = MapLegacyConfig(legacy::ReadStatus::Read, yawOnInsert, onInsert);
-    Check(onInsert.yaw_mode_key_name == "Insert, Ctrl+Shift+H" && onInsert.true_free_look_key_name == "Ctrl+Shift+U",
+    Check(onInsert.yaw_mode_key_name == "Insert, Ctrl+Shift+H" && onInsert.true_free_look_key_name == "Ctrl+Shift+J",
           "Insert already taken leaves the free look toggle on its chord alone");
     bool follows = false;
     for (const auto id : insertResult.follows_defaults_ini) {

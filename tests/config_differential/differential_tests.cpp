@@ -432,7 +432,7 @@ struct Startup {
 // 5ea3ff9), and the lean's wall check always ran with a 0.10 margin, 0.9 release smoothing and
 // the 0x2dbf layer mask (src/camera_adapter.cpp at v0.1.0 and 5ea3ff9). No setting reached either.
 // It had no true free look: the import starts sights locked, with the toggle on Insert unless an
-// older action already has that key, and on Ctrl+Shift+U.
+// older action already has that key, and on Ctrl+Shift+J (the game binds U).
 Startup FromImport(const legacy::Config& c) {
     Startup s;
     s.port = c.udp_port;
@@ -458,7 +458,7 @@ Startup FromImport(const legacy::Config& c) {
     const bool insertTaken = std::any_of(s.hotkeys.begin(), s.hotkeys.end(),
                                          [](const Registration& r) { return r.vk == VK_INSERT && r.modifiers == kNav; });
     if (!insertTaken) s.hotkeys.push_back({Action::TrueFreeLook, VK_INSERT, kNav});
-    s.hotkeys.push_back({Action::TrueFreeLook, 'U', kChord});
+    s.hotkeys.push_back({Action::TrueFreeLook, 'J', kChord});
     std::sort(s.hotkeys.begin(), s.hotkeys.end());
     return s;
 }
@@ -538,7 +538,8 @@ std::vector<std::string> StartupDifferences(const Startup& a, const Startup& b) 
 // ---------------------------------------------------------------------------
 
 // Every row of the table that follows Defaults.ini: all but CollisionMargin and
-// CollisionChannel, which every game keeps for itself, and the local DisableInCoop.
+// CollisionChannel, which every game keeps for itself, the per-game TrueFreeLookKey, and the
+// local DisableInCoop.
 const std::set<Concept>& AllRows() {
     static const std::set<Concept> all = {
         Concept::UdpPort,          Concept::EnableOnStartup,    Concept::WorldSpaceYaw,
@@ -547,7 +548,7 @@ const std::set<Concept>& AllRows() {
         Concept::PositionLimitYDown, Concept::PositionLimitZ,   Concept::PositionLimitZBack,
         Concept::CollisionEnabled, Concept::CollisionReleaseSmoothing, Concept::ToggleKey,
         Concept::CycleTrackingModeKey, Concept::YawModeKey,     Concept::LightFollowsHead,
-        Concept::LightMultiplier,  Concept::TrueFreeLook,       Concept::TrueFreeLookKey,
+        Concept::LightMultiplier,  Concept::TrueFreeLook,
     };
     return all;
 }
@@ -976,7 +977,7 @@ int main() {
                 c.position.limit_x != 0.5f || c.position.limit_y != 0.25f || c.position.limit_y_down != 0.15f ||
                 c.position.limit_z != 0.3f || c.position.limit_z_back != 0.05f || c.toggle_key_name != "F8" ||
                 c.cycle_tracking_mode_key_name != "F9" || c.yaw_mode_key_name != "F10" ||
-                c.true_free_look_key_name != "F11" || !c.true_free_look || c.light.follows_head ||
+                c.true_free_look_key_name != "Insert, Ctrl+Shift+J" || !c.true_free_look || c.light.follows_head ||
                 c.light.multiplier != 1.0f || c.collision_enabled || c.lean_clamp.release_smoothing != 0.5f) {
                 Fail("Defaults.ini", "the edited Defaults.ini does not reach every row it names");
             }

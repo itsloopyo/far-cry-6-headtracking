@@ -142,11 +142,11 @@ cluster still reaches all of them:
 | Toggle tracking     | `End`       | `Ctrl+Shift+Y`  |
 | Cycle tracking mode | `Page Up`   | `Ctrl+Shift+G`  |
 | Switch world/local yaw | `Page Down` | `Ctrl+Shift+H` |
-| Toggle true free look | `Insert`    | `Ctrl+Shift+U` |
+| Toggle true free look | `Insert`    | `Ctrl+Shift+J` |
 
-Far Cry 6 opens the Arsenal on `U`, and it still does with Ctrl and Shift held, so
-`Ctrl+Shift+U` opens the Arsenal as well as toggling true free look. Use `Insert`,
-or put another key in `TrueFreeLookKey`.
+The true free look chord is `Ctrl+Shift+J` in this game rather than the usual
+`Ctrl+Shift+U`, because Far Cry 6 opens the Arsenal on `U`, even with Ctrl and
+Shift held.
 
 `Page Up` / `Ctrl+Shift+G` cycles tracking mode:
 
@@ -178,7 +178,7 @@ magnify it. Scopes have not been tested.
 
 By default leaning never takes your eye off the sights, and leaning in towards
 them brings them closer, up to the rear sight. `Insert` /
-`Ctrl+Shift+U` switches to **true free look**: the weapon stays put and your
+`Ctrl+Shift+J` switches to **true free look**: the weapon stays put and your
 head moves freely around it, so to see down the sights you have to put your head
 behind them, as you would in VR. It is hard, and it is off by default. The mod
 saves the mode you pick, so it holds the next time you start the game.
@@ -239,7 +239,6 @@ The built-in value of each setting set to `default` below:
 - `ToggleKey=End, Ctrl+Shift+Y`
 - `CycleTrackingModeKey=PageUp, Ctrl+Shift+G`
 - `YawModeKey=PageDown, Ctrl+Shift+H`
-- `TrueFreeLookKey=Insert, Ctrl+Shift+U`
 - `LightFollowsHead=true`
 - `LightMultiplier=1.5`
 
@@ -316,7 +315,7 @@ CycleTrackingModeKey=default
 ; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
 YawModeKey=default
 ; Switches between keeping your eye on the sights and true free look (TrueFreeLook).
-TrueFreeLookKey=default
+TrueFreeLookKey=Insert, Ctrl+Shift+J
 
 [Light]
 ; true: a light you carry points where you look instead of where you aim.
@@ -400,7 +399,7 @@ every 600 frames carrying the pose being handed to the game.
 **I can't see down the sights, they are misaligned**
 
 - You are in true free look and your head is leaned off them. Move your head back
-  behind them, or press `Insert` / `Ctrl+Shift+U` to return to sights locked.
+  behind them, or press `Insert` / `Ctrl+Shift+J` to return to sights locked.
 
 **The game window moved when I launched**
 

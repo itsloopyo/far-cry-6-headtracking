@@ -14,7 +14,11 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const migratedDir = process.argv[2];
 if (!migratedDir) throw new Error("usage: node lint-migrated.mjs <folder of migrated files>");
 
-const options = { dialect: "native", perGame: [] };
+const format = JSON.parse(fs.readFileSync(path.join(repo, "cameraunlock-core", "data", "config-format.json"), "utf8"));
+const options = {
+  dialect: "native",
+  perGame: (format.per_game["far-cry-6-headtracking"] ?? []).map((entry) => entry.row),
+};
 const VALUED = /per_game (does not list it|lists none of them) for this repo/;
 const failures = [];
 

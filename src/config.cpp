@@ -46,7 +46,7 @@ LegacyHotkeyCodes EffectiveHotkeys(const legacy::Config& read) {
 
 // The legacy build had no true free look. Its key list comes after the other three, so where
 // one of them already has Insert the list keeps only its chord, as the old build left a later
-// action's key unbound.
+// action's key unbound. The row is per game, so it never follows Defaults.ini.
 bool InsertTaken(const LegacyHotkeyCodes& keys) {
     return keys.toggle == kVkInsert || keys.cycle_mode == kVkInsert || keys.yaw_mode == kVkInsert;
 }
@@ -69,7 +69,10 @@ cfg::ConfigTable<Config> ConfigTable() {
     table.Select(C::WorldSpaceYaw).Writable()
         .Select(C::RotationEnabled).Writable()
         .Select(C::PositionEnabled).Writable()
-        .Select(C::TrueFreeLook).Writable();
+        .Select(C::TrueFreeLook).Writable()
+        // Far Cry 6 opens the Arsenal on U, also with Ctrl and Shift held (per_game in core's
+        // data/config-format.json).
+        .Select(C::TrueFreeLookKey).PerGame("Insert, Ctrl+Shift+J");
     table.Local("Gameplay", "DisableInCoop", &Config::disable_in_coop, cfg::BoolCodec(),
                 "true: head tracking holds the view still while another player is in the session,\n"
                 "so co-op runs the game's own camera.");
@@ -136,7 +139,7 @@ cfg::ImportResult MapLegacyConfig(legacy::ReadStatus status, const legacy::Confi
     out.cycle_tracking_mode_key_name = KeyList(keys.cycle_mode, "CycleMode", 'G', dropped);
     out.yaw_mode_key_name = KeyList(keys.yaw_mode, "YawMode", 'H', dropped);
     if (InsertTaken(keys)) {
-        out.true_free_look_key_name = FormatKeyBindings({{KeyModifiers::kCtrl | KeyModifiers::kShift, 'U'}});
+        out.true_free_look_key_name = FormatKeyBindings({{KeyModifiers::kCtrl | KeyModifiers::kShift, 'J'}});
     }
 
     // A setting the player never changed from what the old build wrote on its first start
@@ -163,7 +166,6 @@ cfg::ImportResult MapLegacyConfig(legacy::ReadStatus status, const legacy::Confi
     follows.Setting(C::ToggleKey, keys.toggle, shippedKeys.toggle);
     follows.Setting(C::CycleTrackingModeKey, keys.cycle_mode, shippedKeys.cycle_mode);
     follows.Setting(C::YawModeKey, keys.yaw_mode, shippedKeys.yaw_mode);
-    follows.Setting(C::TrueFreeLookKey, !InsertTaken(keys));
     follows.NotInLegacy(C::LightFollowsHead);
     follows.NotInLegacy(C::LightMultiplier);
 

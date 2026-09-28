@@ -21,6 +21,8 @@
     "anchor": "game_root",
     "legacy_source": "bin/FarCry6HeadTracking.ini",
     "canonical_since": "0.2.0",
-    "per_game": {}
+    "per_game": {
+      "TrueFreeLookKey": "Insert, Ctrl+Shift+J"
+    }
   }
 }
