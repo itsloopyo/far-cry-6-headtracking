@@ -20,9 +20,12 @@ setup = { cmd = """
 build = { cmd = "cmake --build build --config Debug", depends-on = ["setup"] }
 build-release = { cmd = "cmake --build build --config Release", depends-on = ["setup"] }
 
-# Native unit tests, and the config differential test that holds the frozen legacy
-# reader to the published build's.
-test = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/run-tests.ps1" }
+# Native unit tests. test-differential runs the config differential test that holds the
+# frozen legacy reader to the published build's, lints what it migrated and checks the
+# frozen files; the release paths run it, a push build does not.
+test-unit = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests.ps1 -Suite unit"
+test-differential = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests.ps1 -Suite differential"
+test = { depends-on = ["test-unit", "test-differential"] }
 
 # Rewrites config/FarCry6HeadTracking.ini, the CameraUnlock.ini a first start creates, from
 # the config table after a change to a row, a comment or a default. The unit tests fail until
@@ -38,7 +41,7 @@ uninstall = 'scripts\uninstall.cmd /y'
 # Package the installer ZIP. There is no Nexus ZIP: the mod replaces a file the game
 # ships in its own bin folder, which no mod manager can deploy or roll back, so it is
 # installer-only. Do not add a -nexus.zip stage here.
-package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build-release", "test"] }
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build-release", "test-unit"] }
 
 # The launcher manifest and the notices are what the launcher and the release ZIP
 # are trusted on, so both are checkable rather than reviewed by eye.
@@ -69,6 +72,6 @@ clean = { cmd = """
 
 [dependencies]
 # CMake and Visual Studio come from the system. Node runs the canonical config lint in
-# `test`, which `package` depends on, pinned to the release cameraunlock-core's own lock
+# `test-differential` and core's manifest and notices validators, pinned to the release cameraunlock-core's own lock
 # resolves.
 nodejs = "==26.5.0"

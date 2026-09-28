@@ -20,6 +20,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build and Validate
@@ -40,8 +44,8 @@ jobs:
         with:
           run-install: false
 
-      # package depends on test, so this runs the unit tests and the config
-      # differential test too.
+      # package depends on test-unit. The config differential runs on the release
+      # paths only.
       - name: Build, test and package
         shell: pwsh
         run: |
