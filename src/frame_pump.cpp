@@ -56,21 +56,17 @@ void FramePump::Advance() {
 
     const int64_t now = NowMicroseconds();
     if (!mod.TrackingAllowed()) {
-        m_adsLean.Reset();
         m_aiming = false;
         m_transformation = tobii::Transformation{};
     } else {
         const FrameSample sample = mod.Runtime().SampleFrame();
         m_aiming = CameraAiming();
         if (!mod.Runtime().IsEnabled()) {
-            m_adsLean.Reset();
             m_transformation = ToTransformation(sample);
         } else {
             // Here, ahead of the game, so the native extended view, its HUD
             // compensation, the render lean and the reticle all see one pose.
             m_transformation = ScaleForZoom(ToTransformation(sample), CameraZoomFactor());
-            m_transformation = m_adsLean.Apply(m_aiming, mod.TrueFreeLook(), m_transformation,
-                                               static_cast<unsigned long long>(now / 1000));
         }
     }
     LogAdsEdge(m_aiming);

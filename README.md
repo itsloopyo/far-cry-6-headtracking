@@ -176,14 +176,17 @@ sights still lined up, and your rounds land where those sights point. Head
 movement is scaled to the zoom of iron sights, so aiming down them does not
 magnify it. Scopes have not been tested.
 
-By default leaning never takes your eye off the sights. `Insert` /
+By default leaning never takes your eye off the sights, and leaning in towards
+them brings them closer, up to the rear sight. `Insert` /
 `Ctrl+Shift+U` switches to **true free look**: the weapon stays put and your
 head moves freely around it, so to see down the sights you have to put your head
 behind them, as you would in VR. It is hard, and it is off by default. The mod
 saves the mode you pick, so it holds the next time you start the game.
 
-Leaning eases out while the sights are up, because it would move your eye off
-them. In true free look it stays.
+Leaning in and back carries on while the sights are up: the weapon stays where it
+is and your eye moves up to it or away from it. Leaning sideways or up and down
+eases out while the sights are up, because it would move your eye off them. In
+true free look it stays.
 
 ### Flashlight
 

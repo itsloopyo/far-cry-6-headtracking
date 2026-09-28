@@ -10,6 +10,7 @@
 #include "logging.h"
 #include "mod.h"
 
+#include "cameraunlock/ads/lean_handover.h"
 #include "cameraunlock/camera/lean_clamp.h"
 #include "cameraunlock/camera/zoom_compensation.h"
 #include "cameraunlock/hooks/hook_manager.h"
@@ -85,6 +86,21 @@ constexpr size_t kPoseHistory = 4;
 std::mutex g_poseMutex;
 std::array<RenderPose, kPoseHistory> g_poses;
 size_t g_nextPose = 0;
+
+// Who carries the lean while the sights are up. The part along the aim stays on the view
+// in every mode, so leaning in brings the sights closer. The game has no rig that carries
+// the weapon (see .lab/NOTES.md), so the part across the aim eases out on the sights in
+// sights locked and stays in true free look. Camera-update thread only.
+// How far forward of the game's eye the lean may go with the sights up: past about 0.10 m
+// of applied lean the eye reaches the rifle's rear sight and looks through the receiver.
+constexpr float kEyeReliefMetres = 0.07f;
+
+thread_local cameraunlock::ads::LeanHandover g_leanHandover = [] {
+    cameraunlock::ads::LeanHandover handover;
+    handover.SetForwardStop(kEyeReliefMetres);
+    return handover;
+}();
+
 
 // Published from the camera update, read by the frame pump.
 std::atomic<bool> g_aiming{false};
@@ -331,6 +347,10 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
             Log::Line("ERROR: camera world query unavailable; positional tracking suppressed");
         }
 
+        next.offset = g_leanHandover.Update(next.offset, camera->forward, CameraAiming(),
+                                            Mod::Instance().TrueFreeLook(), false, GetTickCount64())
+                          .camera;
+
         // The reticle, projected basis to basis from the camera the frame is drawn
         // with: the leaned eye and the rolled axes the render hook writes.
         if (world) {
@@ -398,7 +418,8 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
         g_nextPose = (g_nextPose + 1) % kPoseHistory;
     } else {
         // An update of a tracked camera without the head applied (leaving gameplay)
-        // takes its poses off every render of it.
+        // takes its poses off every render of it, and the next aim starts at the hip.
+        g_leanHandover.Stop();
         for (RenderPose& entry : g_poses) {
             if (entry.camera == camera) entry = RenderPose{};
         }

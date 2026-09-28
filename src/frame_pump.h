@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "ads.h"
 #include "tobii_abi.h"
 
 #include <cstdint>
@@ -50,7 +49,6 @@ private:
     void LogAdsEdge(bool aiming);
 
     tobii::Transformation m_transformation{};
-    AdsLean m_adsLean;
     bool m_aiming = false;
     bool m_loggedAiming = false;
     int64_t m_timestampMicroseconds = 0;

@@ -9,7 +9,7 @@
 // holding - because that is a property of this mod's wiring rather than of the
 // receiver core tests already cover.
 
-#include "ads.h"
+#include "cameraunlock/ads/lean_handover.h"
 #include "config.h"
 #include "camera_pose.h"
 #include "pose_bridge.h"
@@ -657,84 +657,36 @@ tobii::Transformation HeadPose(float yaw, float pitch, float roll, float x, floa
     return t;
 }
 
-// Hip fire passes the pose through; with the sights up the lean eases out while
-// rotation, roll included, stays absolute and unscaled.
-void TestAdsLeanEasing() {
+// The camera update hands LeanHandover the lean CameraLean builds and the clean camera's
+// forward. The tracker's forward lean is the part along the aim, so it carries on through
+// the sights; the sideways lean eases out in sights locked and stays in true free look.
+// The view is pitched so the split is along the aim and not along a world axis.
+void TestLeanWhileAiming() {
     using cameraunlock::ads::AdsFade;
-    AdsLean ads;
-    const tobii::Transformation head = HeadPose(20.0f, -10.0f, 15.0f, 30.0f, -20.0f, 40.0f);
+    using cameraunlock::ads::LeanHandover;
+    CameraParameters camera{};
+    const float pitch = 0.5f;
+    camera.forward = {0.0f, std::cos(pitch), std::sin(pitch)};
+    camera.up = {0.0f, -std::sin(pitch), std::cos(pitch)};
+    camera.right = {1.0f, 0.0f, 0.0f};
+    const Vec3 lean = CameraLean(camera, ToTransformation(PositionMetres(0.25f, 0.0f, -0.30f)).position);
 
-    const tobii::Transformation hip = ads.Apply(false, false, head, 1000);
-    CheckNear(hip.rotation.yaw_degrees, 20.0f, "at the hip yaw passes through");
-    CheckNear(hip.rotation.pitch_degrees, -10.0f, "at the hip pitch passes through");
-    CheckNear(hip.rotation.roll_degrees, 15.0f, "at the hip roll passes through");
-    CheckNear(hip.position.x, 30.0f, "at the hip the lean passes through (x)");
-    CheckNear(hip.position.y, -20.0f, "at the hip the lean passes through (y)");
-    CheckNear(hip.position.z, 40.0f, "at the hip the lean passes through (z)");
+    const auto aimed = [&](bool trueFreeLook) {
+        LeanHandover handover;
+        handover.Update(lean, camera.forward, true, trueFreeLook, false, 0);
+        return handover.Update(lean, camera.forward, true, trueFreeLook, false, AdsFade::kLowerMs + 1).camera;
+    };
+    const Vec3 locked = aimed(false);
+    CheckNear(Vec3::Dot(locked, camera.forward), 0.30f, "sights locked, sights up: leaning in carries on");
+    CheckNear(Vec3::Dot(locked, camera.right), 0.0f, "sights locked, sights up: the sideways lean eases out");
+    const Vec3 free = aimed(true);
+    CheckNear(Vec3::Dot(free, camera.forward), 0.30f, "true free look, sights up: leaning in carries on");
+    CheckNear(Vec3::Dot(free, camera.right), -0.25f, "true free look, sights up: the sideways lean stays");
 
-    ads.Apply(true, false, head, 1001);
-    const unsigned long long up = 1001 + AdsFade::kLowerMs + 1;
-    const tobii::Transformation aimed = ads.Apply(true, false, head, up);
-    CheckNear(aimed.rotation.yaw_degrees, 20.0f, "with the sights up yaw is untouched");
-    CheckNear(aimed.rotation.pitch_degrees, -10.0f, "with the sights up pitch is untouched");
-    CheckNear(aimed.rotation.roll_degrees, 15.0f, "with the sights up roll is untouched");
-    CheckNear(aimed.position.x, 0.0f, "with the sights up the lean is out (x)");
-    CheckNear(aimed.position.y, 0.0f, "with the sights up the lean is out (y)");
-    CheckNear(aimed.position.z, 0.0f, "with the sights up the lean is out (z)");
-
-    AdsLean mid;
-    mid.Apply(false, false, head, 0);
-    mid.Apply(true, false, head, 1);
-    const tobii::Transformation half = mid.Apply(true, false, head, 1 + AdsFade::kLowerMs / 2);
-    Check(half.position.z > 0.0f && half.position.z < 40.0f,
-          "mid-transition the lean is part way out");
-    CheckNear(half.position.x / 30.0f, half.position.z / 40.0f,
-              "mid-transition every lean axis is scaled by the same fade");
-    CheckNear(half.rotation.yaw_degrees, 20.0f, "mid-transition yaw is untouched");
-    CheckNear(half.rotation.roll_degrees, 15.0f, "mid-transition roll is untouched");
-
-    // Lowering the sights halfway down continues from where the lean is.
-    const tobii::Transformation reversed =
-        mid.Apply(false, false, head, 2 + AdsFade::kLowerMs / 2);
-    Check(std::fabs(reversed.position.z - half.position.z) < 2.0f,
-          "a reversal mid-transition does not step the lean");
-    const tobii::Transformation back =
-        mid.Apply(false, false, head, 2 + AdsFade::kLowerMs / 2 + AdsFade::kRaiseMs + 1);
-    CheckNear(back.position.z, 40.0f, "lowering the sights returns the lean");
-}
-
-// True free look keeps the lean through the aim, and toggling mid-aim rides the same fade.
-void TestTrueFreeLook() {
-    using cameraunlock::ads::AdsFade;
-    const tobii::Transformation head = HeadPose(20.0f, -10.0f, 15.0f, 30.0f, -20.0f, 40.0f);
-
-    AdsLean ads;
-    ads.Apply(false, true, head, 0);
-    const tobii::Transformation aimed = ads.Apply(true, true, head, 1 + AdsFade::kLowerMs + 1);
-    CheckNear(aimed.rotation.yaw_degrees, 20.0f, "true free look, sights up: yaw passes through");
-    CheckNear(aimed.rotation.roll_degrees, 15.0f, "true free look, sights up: roll passes through");
-    CheckNear(aimed.position.x, 30.0f, "true free look, sights up: the lean stays (x)");
-    CheckNear(aimed.position.y, -20.0f, "true free look, sights up: the lean stays (y)");
-    CheckNear(aimed.position.z, 40.0f, "true free look, sights up: the lean stays (z)");
-
-    const tobii::Transformation hip = ads.Apply(false, true, head, 2 + AdsFade::kLowerMs + 1);
-    CheckNear(hip.position.z, 40.0f, "true free look at the hip: the lean passes through");
-
-    // Sights up in true free look, then back to sights locked mid-aim: the lean slides out.
-    AdsLean toggled;
-    toggled.Apply(true, true, head, 0);
-    toggled.Apply(true, false, head, 1);
-    const tobii::Transformation sliding = toggled.Apply(true, false, head, 1 + AdsFade::kLowerMs / 2);
-    Check(sliding.position.z > 0.0f && sliding.position.z < 40.0f,
-          "switching to sights locked mid-aim eases the lean out rather than stepping");
-    CheckNear(sliding.rotation.yaw_degrees, 20.0f, "the switch leaves rotation untouched");
-    const tobii::Transformation reversed = toggled.Apply(true, true, head, 2 + AdsFade::kLowerMs / 2);
-    Check(std::fabs(reversed.position.z - sliding.position.z) < 2.0f,
-          "switching back mid-transition continues from where the lean is");
-    const unsigned long long lockedAt = 3 + AdsFade::kLowerMs / 2 + AdsFade::kRaiseMs;
-    toggled.Apply(true, false, head, lockedAt);
-    const tobii::Transformation locked = toggled.Apply(true, false, head, lockedAt + AdsFade::kLowerMs + 1);
-    CheckNear(locked.position.z, 0.0f, "sights locked with the sights up leaves no lean");
+    LeanHandover hip;
+    const Vec3 atHip = hip.Update(lean, camera.forward, false, false, false, 0).camera;
+    CheckNear(Vec3::Dot(atHip, camera.right), -0.25f, "at the hip the sideways lean passes through");
+    CheckNear(Vec3::Dot(atHip, camera.forward), 0.30f, "at the hip leaning in passes through");
 }
 
 // The zoom factor shrinks what moves the picture across the frame and leaves roll.
@@ -787,8 +739,7 @@ int main(int argc, char** argv) {
     TestApiVersionGate();
     TestUdpPortRecovery();
     TestWindowCentring();
-    TestAdsLeanEasing();
-    TestTrueFreeLook();
+    TestLeanWhileAiming();
     TestZoomScaling();
 
     if (g_failures == 0) {
