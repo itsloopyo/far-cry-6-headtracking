@@ -335,6 +335,15 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
         float nearPlane;
         std::memcpy(&nearPlane, camera->settings + 4, sizeof(nearPlane));
         void* world = *reinterpret_cast<void**>(g_module + g_offsets->world);
+        // Once per change: this runs every frame, and a line per frame for as long as
+        // the world is missing would stall the camera thread on the log.
+        static thread_local bool worldMissing = false;
+        if (g_collisionEnabled && (world == nullptr) != worldMissing) {
+            worldMissing = world == nullptr;
+            Log::Line(worldMissing
+                          ? "ERROR: camera world query unavailable; positional tracking suppressed"
+                          : "Camera world query available again; positional tracking resumed");
+        }
         if (!g_collisionEnabled) {
             next.offset = CameraLean(yawCamera, next.pose.position);
         } else if (world) {
@@ -343,8 +352,6 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
             QueryContext context{world, ignoredCollider, g_collisionMask};
             next.offset = clamp.Apply(camera->eye, CameraLean(yawCamera, next.pose.position),
                                       g_updateContext.dt, QueryLean, &context);
-        } else {
-            Log::Line("ERROR: camera world query unavailable; positional tracking suppressed");
         }
 
         next.offset = g_leanHandover.Update(next.offset, camera->forward, CameraAiming(),
@@ -358,7 +365,11 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
             const Quat4 delta = g_updateContext.tracked_view * g_updateContext.clean_view.Inverse();
             const Vec3 aim = delta.Inverse().Rotate(camera->forward);
             QueryContext context{world, ignoredCollider, static_cast<uint32_t>(kCollisionLayerMask)};
-            const float distance = AimDistance(context, camera->eye, aim, kReach);
+            // With no lean the eye is the shot's own, the projection is a direction and
+            // the depth cancels, so the ray is only cast when a lean makes it matter:
+            // tracking off, paused, in co-op or rotation only costs no query.
+            const bool hasLean = next.offset.x != 0.0f || next.offset.y != 0.0f || next.offset.z != 0.0f;
+            const float distance = hasLean ? AimDistance(context, camera->eye, aim, kReach) : kReach;
             const Vec3 impact = camera->eye + aim * distance;
             CameraParameters nativeRolled = *camera;
             ApplyCameraRoll(nativeRolled, next.pose.rotation.roll_degrees);
@@ -383,10 +394,10 @@ void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
 
                 static thread_local unsigned aimFrames = 0;
                 if (++aimFrames % 300 == 1) {
-                    Log::Line("AIMGEO dist=%.2f lean=(%.3f,%.3f,%.3f) rot=(%.4f,%.4f) "
+                    Log::Line("AIMGEO dist=%.2f%s lean=(%.3f,%.3f,%.3f) rot=(%.4f,%.4f) "
                               "full=(%.4f,%.4f) parallax=(%.4f,%.4f)",
-                              distance, next.offset.x, next.offset.y, next.offset.z, rotX, rotY,
-                              x, y, x - rotX, y - rotY);
+                              distance, hasLean ? "" : " (not cast)", next.offset.x,
+                              next.offset.y, next.offset.z, rotX, rotY, x, y, x - rotX, y - rotY);
                 }
             }
         }
