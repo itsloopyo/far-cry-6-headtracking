@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.0] - 2026-10-01
+
+### Added
+
+- discover camera dependencies at startup
+
 ## [0.2.0] - 2026-09-30
 
 ### Added
