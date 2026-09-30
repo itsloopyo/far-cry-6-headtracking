@@ -12,7 +12,6 @@
 
 namespace FarCry6HeadTracking {
 
-// Installs nothing when light.follows_head is false, so the beam stays on the aim.
 bool StartHeadlight(uintptr_t module, const Offsets& offsets,
                     const cameraunlock::effects::HeadFollowLightSettings& light);
 

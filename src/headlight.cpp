@@ -140,10 +140,6 @@ void NoteHeadDelta(const Quat4& clean, const Quat4& tracked) {
 
 bool StartHeadlight(uintptr_t module, const Offsets& offsets,
                     const cameraunlock::effects::HeadFollowLightSettings& light) {
-    if (!light.follows_head) {
-        Log::Line("Headlight: LightFollowsHead is off; the flashlight beam stays on the aim");
-        return true;
-    }
     g_multiplier = light.multiplier;
     // Destroy first: once the spawn hook can record a component, its destructor must
     // already be able to clear it.

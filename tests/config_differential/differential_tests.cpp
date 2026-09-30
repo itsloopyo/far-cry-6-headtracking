@@ -416,7 +416,6 @@ struct Startup {
     uint32_t limit_y_down = 0;
     uint32_t limit_z = 0;
     uint32_t limit_z_back = 0;
-    bool light_follows_head = false;
     uint32_t light_multiplier = 0;
     bool true_free_look = false;
     bool collision_enabled = false;
@@ -447,7 +446,6 @@ Startup FromImport(const legacy::Config& c) {
     s.limit_y_down = Bits(c.pos_limit_y);
     s.limit_z = Bits(c.pos_limit_z);
     s.limit_z_back = Bits(c.pos_limit_z_back);
-    s.light_follows_head = true;
     s.light_multiplier = Bits(1.5f);
     s.collision_enabled = true;
     s.collision_margin = Bits(0.10f);
@@ -489,7 +487,6 @@ Startup FromMigration(const Config& c) {
     s.limit_y_down = Bits(c.position.limit_y_down);
     s.limit_z = Bits(c.position.limit_z);
     s.limit_z_back = Bits(c.position.limit_z_back);
-    s.light_follows_head = c.light.follows_head;
     s.light_multiplier = Bits(c.light.multiplier);
     s.true_free_look = c.true_free_look;
     s.collision_enabled = c.collision_enabled;
@@ -521,7 +518,6 @@ std::vector<std::string> StartupDifferences(const Startup& a, const Startup& b) 
     SAME(limit_y_down);
     SAME(limit_z);
     SAME(limit_z_back);
-    SAME(light_follows_head);
     SAME(light_multiplier);
     SAME(true_free_look);
     SAME(collision_enabled);
@@ -547,7 +543,7 @@ const std::set<Concept>& AllRows() {
         Concept::RemoteSmoothing,  Concept::PositionLimitX,     Concept::PositionLimitY,
         Concept::PositionLimitYDown, Concept::PositionLimitZ,   Concept::PositionLimitZBack,
         Concept::CollisionEnabled, Concept::CollisionReleaseSmoothing, Concept::ToggleKey,
-        Concept::CycleTrackingModeKey, Concept::YawModeKey,     Concept::LightFollowsHead,
+        Concept::CycleTrackingModeKey, Concept::YawModeKey,
         Concept::LightMultiplier,  Concept::TrueFreeLook,
     };
     return all;
@@ -587,7 +583,6 @@ void ForEachRowField(Startup& a, const Startup& b, Visit visit) {
     visit(Concept::PositionLimitZBack, a.limit_z_back, b.limit_z_back);
     visit(Concept::CollisionEnabled, a.collision_enabled, b.collision_enabled);
     visit(Concept::CollisionReleaseSmoothing, a.collision_release_smoothing, b.collision_release_smoothing);
-    visit(Concept::LightFollowsHead, a.light_follows_head, b.light_follows_head);
     visit(Concept::LightMultiplier, a.light_multiplier, b.light_multiplier);
     visit(Concept::TrueFreeLook, a.true_free_look, b.true_free_look);
 }
@@ -720,7 +715,7 @@ const char kEditedDefaults[] =
     "PositionLimitYDown=0.15\r\nPositionLimitZ=0.3\r\nPositionLimitZBack=0.05\r\n"
     "TrueFreeLook=true\r\nCollisionEnabled=false\r\nCollisionReleaseSmoothing=0.5\r\n\r\n"
     "[Hotkeys]\r\nToggleKey=F8\r\nCycleTrackingModeKey=F9\r\nYawModeKey=F10\r\nTrueFreeLookKey=F11\r\n\r\n"
-    "[Light]\r\nLightFollowsHead=false\r\nLightMultiplier=1.0\r\n";
+    "[Light]\r\nLightMultiplier=0\r\n";
 
 // What the edited Defaults.ini starts the mod with, read with no legacy file.
 Startup g_editedDefaults;
@@ -977,8 +972,8 @@ int main() {
                 c.position.limit_x != 0.5f || c.position.limit_y != 0.25f || c.position.limit_y_down != 0.15f ||
                 c.position.limit_z != 0.3f || c.position.limit_z_back != 0.05f || c.toggle_key_name != "F8" ||
                 c.cycle_tracking_mode_key_name != "F9" || c.yaw_mode_key_name != "F10" ||
-                c.true_free_look_key_name != "Insert, Ctrl+Shift+J" || !c.true_free_look || c.light.follows_head ||
-                c.light.multiplier != 1.0f || c.collision_enabled || c.lean_clamp.release_smoothing != 0.5f) {
+                c.true_free_look_key_name != "Insert, Ctrl+Shift+J" || !c.true_free_look ||
+                c.light.multiplier != 0.0f || c.collision_enabled || c.lean_clamp.release_smoothing != 0.5f) {
                 Fail("Defaults.ini", "the edited Defaults.ini does not reach every row it names");
             }
         }

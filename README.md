@@ -197,10 +197,9 @@ you are looking at.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `LightFollowsHead` | `true` | Point the light where you are looking |
 | `LightMultiplier` | `1.5` | How far it turns relative to your head. `1.0` matches the view, `0` leaves the beam on the aim |
 
-Both are in the `[Light]` section of the settings file.
+This setting is in the `[Light]` section of the settings file.
 
 ## Configuration
 
@@ -239,7 +238,6 @@ The built-in value of each setting set to `default` below:
 - `ToggleKey=End, Ctrl+Shift+Y`
 - `CycleTrackingModeKey=PageUp, Ctrl+Shift+G`
 - `YawModeKey=PageDown, Ctrl+Shift+H`
-- `LightFollowsHead=true`
 - `LightMultiplier=1.5`
 
 With every setting at its default, the file reads:
@@ -252,8 +250,9 @@ With every setting at its default, the file reads:
 ; that keeps its settings in CameraUnlock.ini reads: %AppData%\CameraUnlock\Defaults.ini on
 ; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on
 ; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini
-; on macOS. The log names the file it read. Write a value instead of default to change that
-; setting for this game only.
+; on macOS. The log names the file it read. Change a setting in Defaults.ini to change it in
+; every game that has it set to default, or write a value here instead of default to change it
+; for this game only.
 
 [CameraUnlock]
 ; Written by the mod. Leave this section in place.
@@ -297,6 +296,7 @@ PositionLimitZ=default
 ; How far, in metres, leaning back can move the view.
 PositionLimitZBack=default
 ; true: leaning stops at walls instead of moving the view through them.
+; Only games whose mod sweeps the level for walls read this; the rest ignore it.
 CollisionEnabled=default
 ; How far, in metres, the view is held off a wall when you lean into it.
 ; The mod holds it at least 0.05 metres past the camera's near clip distance.
@@ -318,8 +318,6 @@ YawModeKey=default
 TrueFreeLookKey=Insert, Ctrl+Shift+J
 
 [Light]
-; true: a light you carry points where you look instead of where you aim.
-LightFollowsHead=default
 ; How far the light turns for each degree your head turns.
 ; 1 matches the view, 0 keeps the light on your aim.
 LightMultiplier=default

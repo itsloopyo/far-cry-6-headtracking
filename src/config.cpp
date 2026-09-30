@@ -59,7 +59,7 @@ cfg::ConfigTable<Config> ConfigTable() {
         {C::UdpPort, C::EnableOnStartup, C::WorldSpaceYaw, C::RotationEnabled, C::LocalSmoothing,
          C::RemoteSmoothing, C::PositionEnabled, C::PositionLimitX, C::PositionLimitY, C::PositionLimitYDown,
          C::PositionLimitZ, C::PositionLimitZBack, C::TrueFreeLook, C::CollisionEnabled, C::CollisionMargin, C::CollisionChannel,
-         C::CollisionReleaseSmoothing, C::ToggleKey, C::CycleTrackingModeKey, C::YawModeKey, C::TrueFreeLookKey, C::LightFollowsHead,
+         C::CollisionReleaseSmoothing, C::ToggleKey, C::CycleTrackingModeKey, C::YawModeKey, C::TrueFreeLookKey,
          C::LightMultiplier});
     table.Select(C::CollisionMargin)
         .Comment("How far, in metres, the view is held off a wall when you lean into it.\n"
@@ -166,7 +166,6 @@ cfg::ImportResult MapLegacyConfig(legacy::ReadStatus status, const legacy::Confi
     follows.Setting(C::ToggleKey, keys.toggle, shippedKeys.toggle);
     follows.Setting(C::CycleTrackingModeKey, keys.cycle_mode, shippedKeys.cycle_mode);
     follows.Setting(C::YawModeKey, keys.yaw_mode, shippedKeys.yaw_mode);
-    follows.NotInLegacy(C::LightFollowsHead);
     follows.NotInLegacy(C::LightMultiplier);
 
     return status == legacy::ReadStatus::Absent
