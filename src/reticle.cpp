@@ -2,6 +2,7 @@
 // Copyright (c) 2026 itsloopyo
 
 #include "reticle.h"
+#include "camera_adapter.h"
 #include "logging.h"
 #include "mod.h"
 
@@ -44,6 +45,7 @@ uint32_t PrefixHash(uintptr_t address) {
 // through its HUD property (+0x1340), without feeding it into the next update.
 void HookedPosition(void* weapon, float dt, void* player) {
     g_position(weapon, dt, player);
+    if (!CameraAdapterActive()) return;
     float position[2];
     std::memcpy(position, static_cast<const uint8_t*>(weapon) + 0xb74, sizeof(position));
     const float nativeX = position[0];
@@ -81,7 +83,7 @@ bool ReticleWeaponOut() {
     return GetTickCount64() - g_state.weapon_stamp <= kFreshMs;
 }
 
-bool StartReticle(uintptr_t module, const Offsets& offsets) {
+bool PrepareReticle(uintptr_t module, const Offsets& offsets) {
     const std::array<NativeFunction, 2> targets{{offsets.reticle_position,
                                                   offsets.reticle_publish_position}};
     for (const auto& target : targets) {
@@ -96,7 +98,6 @@ bool StartReticle(uintptr_t module, const Offsets& offsets) {
     auto& hooks = HookManager::Instance();
     auto status = hooks.CreateHook(address, reinterpret_cast<void*>(&HookedPosition),
                                    reinterpret_cast<void**>(&g_position));
-    if (status == HookStatus::Ok) status = hooks.EnableHook(address);
     if (status != HookStatus::Ok) {
         Log::Line("ERROR: reticle hook installation: %s", HookStatusToString(status));
         return false;

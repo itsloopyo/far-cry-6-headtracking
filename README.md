@@ -408,10 +408,11 @@ every 600 frames carrying the pose being handed to the game.
 
 ### Known limitations
 
-- **The mod checks the game build before starting.** It knows one Steam build and
-  one Ubisoft Connect build. On any other build it leaves the game alone, and the
-  log records the build's fingerprint and whether it is newer or older than the
-  builds the mod knows.
+- **The mod validates the game's camera interfaces before starting.** It can find
+  relocated functions and globals when their instruction and layout contracts
+  still match. An ambiguous or changed contract disables tracking, with the
+  reason and game fingerprint recorded in the log. A future patch may still
+  require a mod update.
 - **Lean is limited by nearby geometry.** The mod uses the game's collision query
   to keep the eye back from an obstruction. `CollisionEnabled=false` in
   `CameraUnlock.ini` turns this off, and `CollisionReleaseSmoothing` sets how

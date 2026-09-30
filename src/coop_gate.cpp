@@ -2,6 +2,7 @@
 // Copyright (c) 2026 itsloopyo
 
 #include "coop_gate.h"
+#include "coop_session.h"
 
 #include "logging.h"
 #include "mod.h"
@@ -22,61 +23,28 @@ constexpr char kUpcModule[] = "upc_r2_loader64.dll";
 constexpr char kSetName[] = "UPC_MultiplayerSessionSet";
 constexpr char kClearName[] = "UPC_MultiplayerSessionClear";
 
-// More parameters than either function declares. On x64 the caller cleans up and
-// the first four arrive in registers, so forwarding a fixed eight passes every
-// real argument through untouched whatever the true arity is, and the surplus is
-// read by nobody.
-//
-// The return is 64 bits wide for the same reason the parameter list is long. A
-// narrower one would forward only the low half of rax, so if either export
-// returns a handle or a pointer the game reads back a truncated value; declaring
-// it wide is correct whatever the true return type is, including void.
-using UpcFn = uint64_t(__fastcall*)(void*, void*, void*, void*, void*, void*, void*,
-                                    void*);
+using SetSessionFn = int32_t(__fastcall*)(void*, const void*);
+using ClearSessionFn = int32_t(__fastcall*)(void*);
 
 // One watched export: where the detour was installed, so it can be removed, and the
 // trampoline back to the game's own implementation, which every detour must call.
 struct WatchedExport {
-    UpcFn original = nullptr;
+    void* original = nullptr;
     void* target = nullptr;
 };
 
 WatchedExport g_set;
 WatchedExport g_clear;
 
-// The session descriptor the game hands to UPC_MultiplayerSessionSet: an id
-// pointer, then the maximum and the current player count as 32-bit values.
-//
-// Reading the counts is what makes the gate usable at all. Far Cry 6's co-op is
-// drop-in, so the game publishes a joinable session the moment the world loads
-// and keeps it published for the whole session. Treating "a session exists" as
-// "in co-op" switched head tracking off in ordinary single player, which is how
-// these offsets came to be read: the first descriptor logged in a solo session
-// was max 2, current 1.
-struct SessionCounts {
-    bool read = false;
-    uint32_t max_players = 0;
-    uint32_t current_players = 0;
-};
-
-constexpr size_t kMaxPlayerCountOffset = 0x08;
-constexpr size_t kCurrentPlayerCountOffset = 0x0C;
-
-SessionCounts ReadCounts(void* session) {
-    SessionCounts counts;
-    if (!session) return counts;
-    const auto* bytes = static_cast<const uint8_t*>(session);
-    // The pointer comes from the game and is only read, but it is still one this
-    // code did not create.
+SessionCounts ReadCounts(const void* session) {
+    if (!session) return {};
+    uint8_t bytes[kSessionPopulationBytes];
     __try {
-        counts.max_players = *reinterpret_cast<const uint32_t*>(bytes + kMaxPlayerCountOffset);
-        counts.current_players =
-            *reinterpret_cast<const uint32_t*>(bytes + kCurrentPlayerCountOffset);
-        counts.read = true;
+        std::memcpy(bytes, session, sizeof(bytes));
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        counts.read = false;
+        return {};
     }
-    return counts;
+    return DecodeSessionCounts(bytes, sizeof(bytes));
 }
 
 // Logged on every change of the player count rather than on every publish: the game
@@ -106,22 +74,20 @@ void ReportUnreadableSession() {
               "head tracking cannot tell co-op from single player and stays on.");
 }
 
-uint64_t __fastcall HookedSet(void* a1, void* a2, void* a3, void* a4, void* a5,
-                              void* a6, void* a7, void* a8) {
-    const SessionCounts counts = ReadCounts(a2);
+int32_t __fastcall HookedSet(void* context, const void* session) {
+    const SessionCounts counts = ReadCounts(session);
     if (counts.read) {
         ReportSessionCounts(counts);
         Mod::Instance().SetInCoopSession(counts.current_players > 1);
     } else {
         ReportUnreadableSession();
     }
-    return g_set.original(a1, a2, a3, a4, a5, a6, a7, a8);
+    return reinterpret_cast<SetSessionFn>(g_set.original)(context, session);
 }
 
-uint64_t __fastcall HookedClear(void* a1, void* a2, void* a3, void* a4, void* a5,
-                                void* a6, void* a7, void* a8) {
+int32_t __fastcall HookedClear(void* context) {
     Mod::Instance().SetInCoopSession(false);
-    return g_clear.original(a1, a2, a3, a4, a5, a6, a7, a8);
+    return reinterpret_cast<ClearSessionFn>(g_clear.original)(context);
 }
 
 bool Install(HMODULE module, const char* name, void* detour, WatchedExport& out) {

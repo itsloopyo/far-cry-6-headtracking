@@ -7,14 +7,8 @@
 
 #include <cstdint>
 
-// One shipped FC_m64d3d12.dll: its PE fingerprint and where the camera functions
-// sit in it.
-//
-// Append-only. A patch or a store build that moves a function gets a NEW profile
-// added to the top of kKnownProfiles, never an in-place edit, so a user who has not
-// taken the patch keeps matching the profile their module was built with. The top
-// entry is the diagnostic primary: when nothing matches, the running fingerprint is
-// compared against it to say whether the game is newer, older, or repacked.
+// Historical profiles cross-check discovery on previously supported images.
+// Keep these measurements append-only.
 namespace FarCry6HeadTracking {
 
 // A function the mod hooks or calls, with the FNV-1a hash of its first 32 bytes in
@@ -50,6 +44,7 @@ struct Offsets {
     NativeFunction set_world_matrix;
     uintptr_t extended_view_instance;
     uintptr_t world;
+    uintptr_t flashlight_vtable = 0;
 };
 
 struct BuildProfile {
@@ -64,9 +59,5 @@ extern const BuildProfile kSteamProfile_20230428;
 // Most recent build first.
 extern const BuildProfile* const kKnownProfiles[];
 extern const int kKnownProfileCount;
-
-// Fingerprints the module, logs the result either way, and returns the matching
-// profile, or nullptr when nothing matches and the camera must be left alone.
-const BuildProfile* MatchRunningBuild(void* module);
 
 }  // namespace FarCry6HeadTracking

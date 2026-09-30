@@ -27,6 +27,8 @@ add_library(FarCry6HeadTracking SHARED
     src/headlight.cpp
     src/reticle.cpp
     src/build_profile.cpp
+    src/runtime_discovery.cpp
+    src/running_discovery.cpp
     src/ubisoft_offsets.cpp
     src/steam_offsets.cpp
     src/dllmain.cpp
@@ -51,7 +53,8 @@ set_target_properties(FarCry6HeadTracking PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
 )
 
-target_include_directories(FarCry6HeadTracking PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(FarCry6HeadTracking PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/cameraunlock-core/vendor/minhook/src/hde)
 target_link_libraries(FarCry6HeadTracking PRIVATE cameraunlock cameraunlock_hooks minhook)
 
 if(MSVC)
@@ -72,6 +75,11 @@ if(FARCRY6_BUILD_TESTS)
     enable_testing()
     add_executable(farcry6_tests
         tests/farcry6_tests.cpp
+        tests/discovery_tests.cpp
+        src/runtime_discovery.cpp
+        src/build_profile.cpp
+        src/ubisoft_offsets.cpp
+        src/steam_offsets.cpp
         src/config.cpp
         src/legacy_config/legacy_config.cpp
         src/tracking_runtime.cpp
@@ -81,6 +89,7 @@ if(FARCRY6_BUILD_TESTS)
     target_include_directories(farcry6_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/cameraunlock-core/cpp/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/cameraunlock-core/vendor/minhook/src/hde
     )
     target_compile_definitions(farcry6_tests PRIVATE
         FARCRY6_COMMITTED_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/config/FarCry6HeadTracking.ini")

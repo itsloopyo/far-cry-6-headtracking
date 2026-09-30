@@ -2,6 +2,7 @@
 // Copyright (c) 2026 itsloopyo
 
 #include "headlight.h"
+#include "camera_adapter.h"
 #include "logging.h"
 
 #include "cameraunlock/effects/head_follow_light.h"
@@ -30,6 +31,7 @@ using SetWorldMatrixFn = void (*)(void*, const float*, void*);
 SpawnFn g_spawn = nullptr;
 DestroyFn g_destroy = nullptr;
 SetWorldMatrixFn g_setWorldMatrix = nullptr;
+uintptr_t g_vtable = 0;
 
 // The flashlight component, seen when the game spawns its light. Cleared by the
 // component's own destructor, so SetWorldMatrix never follows a freed pointer.
@@ -61,11 +63,17 @@ Quat4 ScaleAngle(Quat4 q, float scale) {
 
 void HookedSpawn(void* component) {
     g_spawn(component);
+    if (!CameraAdapterActive()) return;
+    if (*static_cast<const uintptr_t*>(component) != g_vtable) {
+        Log::Line("ERROR: flashlight component vtable differs; beam tracking rejected");
+        return;
+    }
     g_component.store(static_cast<uint8_t*>(component), std::memory_order_release);
     Log::Line("Headlight: flashlight component %p", component);
 }
 
 void* HookedDestroy(void* component, unsigned flags) {
+    if (!CameraAdapterActive()) return g_destroy(component, flags);
     uint8_t* expected = static_cast<uint8_t*>(component);
     g_component.compare_exchange_strong(expected, nullptr, std::memory_order_acq_rel);
     return g_destroy(component, flags);
@@ -74,8 +82,9 @@ void* HookedDestroy(void* component, unsigned flags) {
 // Called for every entity whose transform changes. Rows 0-2 of the matrix are the
 // entity's right, forward and up axes in world space, row 3 its position.
 void HookedSetWorldMatrix(void* entity, const float* matrix, void* extra) {
+    if (!CameraAdapterActive()) return g_setWorldMatrix(entity, matrix, extra);
     const uint8_t* component = g_component.load(std::memory_order_acquire);
-    if (!component || entity != LightEntity(component)) {
+    if (!component || *reinterpret_cast<const uintptr_t*>(component) != g_vtable || entity != LightEntity(component)) {
         g_setWorldMatrix(entity, matrix, extra);
         return;
     }
@@ -122,7 +131,6 @@ bool Hook(uintptr_t module, const NativeFunction& target, void* detour, void** o
     void* address = reinterpret_cast<void*>(module + target.rva);
     auto& hooks = HookManager::Instance();
     auto status = hooks.CreateHook(address, detour, original);
-    if (status == HookStatus::Ok) status = hooks.EnableHook(address);
     if (status != HookStatus::Ok) {
         Log::Line("ERROR: headlight %s hook: %s", name, HookStatusToString(status));
         return false;
@@ -138,18 +146,28 @@ void NoteHeadDelta(const Quat4& clean, const Quat4& tracked) {
     g_deltaStamp = GetTickCount64();
 }
 
-bool StartHeadlight(uintptr_t module, const Offsets& offsets,
+bool PrepareHeadlight(uintptr_t module, const Offsets& offsets,
                     const cameraunlock::effects::HeadFollowLightSettings& light) {
     g_multiplier = light.multiplier;
+    g_vtable = module + offsets.flashlight_vtable;
     // Destroy first: once the spawn hook can record a component, its destructor must
     // already be able to clear it.
-    if (!Hook(module, offsets.flashlight_destroy, reinterpret_cast<void*>(&HookedDestroy),
-              reinterpret_cast<void**>(&g_destroy), "destroy") ||
-        !Hook(module, offsets.flashlight_spawn, reinterpret_cast<void*>(&HookedSpawn),
-              reinterpret_cast<void**>(&g_spawn), "spawn") ||
-        !Hook(module, offsets.set_world_matrix, reinterpret_cast<void*>(&HookedSetWorldMatrix),
-              reinterpret_cast<void**>(&g_setWorldMatrix), "transform")) {
-        return false;
+    struct Target { NativeFunction function; void* detour; void** original; const char* name; };
+    const Target targets[]{
+        {offsets.flashlight_destroy, reinterpret_cast<void*>(&HookedDestroy), reinterpret_cast<void**>(&g_destroy), "destroy"},
+        {offsets.flashlight_spawn, reinterpret_cast<void*>(&HookedSpawn), reinterpret_cast<void**>(&g_spawn), "spawn"},
+        {offsets.set_world_matrix, reinterpret_cast<void*>(&HookedSetWorldMatrix), reinterpret_cast<void**>(&g_setWorldMatrix), "transform"},
+    };
+    size_t created = 0;
+    for (const auto& target : targets) {
+        if (!Hook(module, target.function, target.detour, target.original, target.name)) {
+            for (size_t i = 0; i < created; ++i) {
+                const auto status = HookManager::Instance().RemoveHook(reinterpret_cast<void*>(module + targets[i].function.rva));
+                if (status != HookStatus::Ok) Log::Line("ERROR: headlight rollback: %s", HookStatusToString(status));
+            }
+            return false;
+        }
+        ++created;
     }
     Log::Line("Headlight: the flashlight beam follows head yaw and pitch at %.2fx", g_multiplier);
     return true;

@@ -9,7 +9,7 @@
 
 namespace FarCry6HeadTracking {
 
-bool StartReticle(uintptr_t module, const Offsets& offsets);
+bool PrepareReticle(uintptr_t module, const Offsets& offsets);
 
 // How far the shot's landing point sits from where the weapon's own projection puts
 // it, centred and normalised (x right, y down), the space the weapon reports its

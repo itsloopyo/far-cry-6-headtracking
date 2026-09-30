@@ -711,6 +711,8 @@ void TestZoomScaling() {
     CheckNear(zoomed.position.z, 20.0f, "the lean scales with the zoom (z)");
 }
 
+int TestDiscovery();
+
 int main(int argc, char** argv) {
     // `pixi run render-config`: write the committed settings file and run nothing else.
     if (argc == 3 && std::strcmp(argv[1], "--render-config") == 0) {
@@ -741,6 +743,7 @@ int main(int argc, char** argv) {
     TestWindowCentring();
     TestLeanWhileAiming();
     TestZoomScaling();
+    g_failures += TestDiscovery();
 
     if (g_failures == 0) {
         std::printf("all tests passed\n");

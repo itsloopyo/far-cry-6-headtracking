@@ -12,7 +12,7 @@
 
 namespace FarCry6HeadTracking {
 
-bool StartHeadlight(uintptr_t module, const Offsets& offsets,
+bool PrepareHeadlight(uintptr_t module, const Offsets& offsets,
                     const cameraunlock::effects::HeadFollowLightSettings& light);
 
 // The extended view's clean aim and the tracked view the game renders, both world

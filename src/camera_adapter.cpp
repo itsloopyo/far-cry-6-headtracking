@@ -3,6 +3,7 @@
 
 #include "camera_adapter.h"
 #include "build_profile.h"
+#include "runtime_discovery.h"
 #include "camera_pose.h"
 #include "frame_pump.h"
 #include "headlight.h"
@@ -46,6 +47,8 @@ SetAnglesFn g_setAngles = nullptr;
 RenderFn g_render = nullptr;
 uintptr_t g_module = 0;
 const Offsets* g_offsets = nullptr;
+Offsets g_resolved{};
+std::atomic<bool> g_active{false};
 
 // Set once from the settings before the hooks go in, and read-only after.
 bool g_collisionEnabled = false;
@@ -215,6 +218,7 @@ void PublishAiming(void* camera) {
 }
 
 void HookedUpdate(void* camera, float dt, unsigned flags) {
+    if (!CameraAdapterActive()) return g_update(camera, dt, flags);
     auto* extendedView = *reinterpret_cast<uint8_t**>(g_module + g_offsets->extended_view_instance);
     uint8_t inIronsight = 0;
     uint8_t aimAtGaze = 0;
@@ -234,6 +238,7 @@ void HookedUpdate(void* camera, float dt, unsigned flags) {
     }
     g_updateContext = UpdateContext{};
     g_updateContext.camera = camera;
+    g_updateContext.extended_view = extendedView;
     g_updateContext.dt = dt;
     g_update(camera, dt, flags);
     PublishAiming(camera);
@@ -247,6 +252,8 @@ void HookedUpdate(void* camera, float dt, unsigned flags) {
 
 void HookedRotation(void* extendedView, const Quat4* reference, Quat4* result) {
     g_rotation(extendedView, reference, result);
+    if (!CameraAdapterActive() || !g_updateContext.camera ||
+        extendedView != g_updateContext.extended_view) return;
     g_updateContext.head_active = true;
     g_updateContext.extended_view = extendedView;
     const auto* quats = reinterpret_cast<const Quat4*>(static_cast<uint8_t*>(extendedView) + 0xf0);
@@ -307,6 +314,7 @@ void PublishZoom(const CameraParameters& camera) {
 
 void HookedSetAngles(CameraParameters* camera, const Vec3* angles) {
     g_setAngles(camera, angles);
+    if (!CameraAdapterActive()) return;
     if (!g_updateContext.camera) return;
 
     RenderPose next;
@@ -445,6 +453,7 @@ bool SameView(const CameraParameters& camera, const RenderPose& pose) {
 
 void HookedRender(const CameraParameters* camera, void* output, const float* viewport,
                   float aspect, const void* projection) {
+    if (!CameraAdapterActive()) return g_render(camera, output, viewport, aspect, projection);
     RenderPose pose;
     {
         std::lock_guard<std::mutex> lock(g_poseMutex);
@@ -474,6 +483,8 @@ void HookedRender(const CameraParameters* camera, void* output, const float* vie
 
 }  // namespace
 
+bool CameraAdapterActive() { return g_active.load(std::memory_order_acquire); }
+
 float CameraZoomFactor() {
     // Stale outside gameplay, where no pose reaches the camera anyway.
     if (GetTickCount64() - g_zoomStamp.load(std::memory_order_relaxed) > kAimingFreshMs) {
@@ -501,22 +512,24 @@ bool StartCameraAdapter(const Config& config) {
         Log::Line("Lean collision: off (CollisionEnabled=false), so leaning can move the view through walls");
     }
     auto* module = GetModuleHandleW(L"FC_m64d3d12.dll");
-    const BuildProfile* profile = MatchRunningBuild(module);
-    if (!profile) return false;
+    if (!discovery::ResolveRunningBuild(module, g_resolved)) return false;
     g_module = reinterpret_cast<uintptr_t>(module);
-    g_offsets = profile->offsets;
+    g_offsets = &g_resolved;
     const Offsets& o = *g_offsets;
     for (const NativeFunction& check :
          {o.camera_update, o.extended_view_rotation, o.set_camera_angles, o.render_camera,
           o.world_ray_query, o.query_filter_construct, o.query_filter_destroy,
           o.query_hits_destroy, o.camera_owner, o.owner_body, o.body_collider, o.sights_read,
-          o.binoculars_call}) {
+          o.binoculars_call, o.reticle_position, o.reticle_publish_position,
+          o.flashlight_spawn, o.flashlight_destroy, o.set_world_matrix}) {
         const auto* bytes = reinterpret_cast<const uint8_t*>(g_module + check.rva);
         uint32_t hash = 2166136261u;
         for (size_t i = 0; i < 32; ++i) hash = (hash ^ bytes[i]) * 16777619u;
         if (hash != check.prefix_hash) {
             Log::Line("ERROR: camera function verification failed at %llX; tracking disabled",
                       static_cast<unsigned long long>(check.rva));
+            g_offsets = nullptr;
+            g_resolved = {};
             return false;
         }
     }
@@ -524,6 +537,8 @@ bool StartCameraAdapter(const Config& config) {
     auto status = hooks.Initialize();
     if (status != HookStatus::Ok && status != HookStatus::ErrorAlreadyInitialized) {
         Log::Line("ERROR: camera hook initialization: %s", HookStatusToString(status));
+        g_offsets = nullptr;
+        g_resolved = {};
         return false;
     }
     struct Hook { uintptr_t rva; void* detour; void** original; };
@@ -540,24 +555,42 @@ bool StartCameraAdapter(const Config& config) {
         if (status != HookStatus::Ok) break;
         ++created;
     }
+    std::vector<uintptr_t> installed;
+    for (size_t i = 0; i < created; ++i) installed.push_back(targets[i].rva);
     if (status == HookStatus::Ok) {
-        for (const auto& target : targets) {
-            status = hooks.EnableHook(reinterpret_cast<void*>(g_module + target.rva));
+        if (PrepareReticle(g_module, o)) installed.push_back(o.reticle_position.rva);
+        else status = HookStatus::Unknown;
+    }
+    if (status == HookStatus::Ok) {
+        if (PrepareHeadlight(g_module, o, config.light)) {
+            installed.insert(installed.end(), {o.flashlight_destroy.rva, o.flashlight_spawn.rva,
+                                               o.set_world_matrix.rva});
+        } else status = HookStatus::Unknown;
+    }
+    if (status == HookStatus::Ok) {
+        for (const auto rva : installed) {
+            status = hooks.EnableHook(reinterpret_cast<void*>(g_module + rva));
             if (status != HookStatus::Ok) break;
         }
     }
     if (status != HookStatus::Ok) {
         Log::Line("ERROR: camera hook installation: %s", HookStatusToString(status));
-        for (size_t i = 0; i < created; ++i) {
-            void* address = reinterpret_cast<void*>(g_module + targets[i].rva);
-            hooks.DisableHook(address);
-            hooks.RemoveHook(address);
+        for (const auto rva : installed) {
+            void* address = reinterpret_cast<void*>(g_module + rva);
+            const auto removed = hooks.RemoveHook(address);
+            if (removed != HookStatus::Ok) {
+                Log::Line("ERROR: camera hook rollback at %llX: %s; detour remains inactive",
+                          static_cast<unsigned long long>(rva), HookStatusToString(removed));
+            }
         }
+        g_offsets = nullptr;
+        g_resolved = {};
         return false;
     }
+    g_active.store(true, std::memory_order_release);
     Log::Line("Camera adapter active: native yaw/pitch, render roll and %s XYZ",
               g_collisionEnabled ? "collision-clamped" : "unclamped");
-    return StartReticle(g_module, o) && StartHeadlight(g_module, o, config.light);
+    return true;
 }
 
 }  // namespace FarCry6HeadTracking

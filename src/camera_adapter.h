@@ -7,6 +7,7 @@
 
 namespace FarCry6HeadTracking {
 bool StartCameraAdapter(const Config& config);
+bool CameraAdapterActive();
 
 // Whether the player has a weapon's sights up, as of the last camera update.
 bool CameraAiming();

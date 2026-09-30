@@ -37,7 +37,8 @@ Copyright (c) itsloopyo.
 - **Upstream:** https://github.com/TsudaKageyu/minhook
 - **Usage:** Hooks the camera, reticle and flashlight interfaces, and
   watches two Ubisoft Connect entry points so head tracking can hold still in a
-  co-op session.
+  co-op session. Its HDE64 decoder also validates native instruction boundaries
+  during startup discovery.
 - **Bundled:** yes. Vendored inside cameraunlock-core and compiled into the shipped
   DLL.
 
@@ -191,6 +192,9 @@ affiliated with or endorsed by Tobii.
   exports the game already calls, `UPC_MultiplayerSessionSet` and
   `UPC_MultiplayerSessionClear`, forwarding each call unchanged, so that head
   tracking can hold still while a multiplayer session is published.
+- **ABI reference:** the locally installed `uplay_r264.dll` export implementations
+  and its named multiplayer-session protocol fields establish the argument,
+  result and session-population layouts. No SDK implementation is included.
 - **Bundled:** no.
 
 ---
@@ -205,7 +209,9 @@ affiliated with or endorsed by Tobii.
   location, gaze-aim flags, collision query interface, reticle screen position,
   flashlight component and entity transform setter establish the boundary used by
   `src/camera_adapter.cpp`, `src/camera_pose.h`, `src/reticle.cpp` and
-  `src/headlight.cpp`.
+  `src/headlight.cpp`. Startup discovery uses normalized instruction hashes,
+  call relationships, image bounds and vtable relationships to validate those
+  interfaces. The historical profiles remain independent cross-checks.
 - **Bundled:** no game code, headers or binaries. The adapter and its declarations
   are this project's own MIT-licensed implementation.
 
